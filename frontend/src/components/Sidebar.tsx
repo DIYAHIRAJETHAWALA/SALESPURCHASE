@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Search,
-  Store,
   FileSpreadsheet,
   TableProperties,
   Layers,
@@ -19,7 +18,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
     { id: 'category_analysis', label: 'Category & Recipe BI', icon: Layers },
     { id: 'master_merged', label: 'Merged S&P Table', icon: TableProperties },
     { id: 'outlet_search', label: 'Outlet Search', icon: Search },
-    { id: 'all_outlets', label: 'All Outlets', icon: Store },
   ];
 
   return (
