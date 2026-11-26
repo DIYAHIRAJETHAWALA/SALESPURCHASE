@@ -6,6 +6,7 @@ import {
 import { useUploadedData, UploadResult, ItemRow } from '../context/UploadedDataContext';
 import { fetchOutletsList } from '../api';
 import { fuzzyOutletScore, isTotalRowLabel, normalizeOutletStr } from '../utils/outletFuzzy';
+import { BUILT_IN_OUTLETS } from '../data/builtInOutlets';
 
 interface OutletSearchPageProps {
   onSelectOutlet?: (outletId: number) => void;
@@ -51,17 +52,35 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // ── Step 1: Seed built-in outlets immediately (no network needed) ──
+    const builtIn: OutletRow[] = BUILT_IN_OUTLETS.map((o) => ({
+      outlet: o.outlet,
+      code: o.code,
+      city: o.city,
+      aliases: o.aliases,
+      source: 'database' as const,
+      individual_sales: 0,
+      combo_sales: 0,
+      total_sales_qty: 0,
+      purchase_packs: 0,
+      purchase_units: 0,
+      rmd_pct: 0,
+      items: [],
+    }));
+    setDbOutlets(builtIn);
+
+    // ── Step 2: Try to enrich from API (richer aliases, codes, cities) ──
     let cancelled = false;
     fetchOutletsList()
       .then((list) => {
-        if (cancelled || !Array.isArray(list)) return;
+        if (cancelled || !Array.isArray(list) || list.length === 0) return;
         const mapped: OutletRow[] = list.map((o) => ({
           outlet: o.official_name,
           dbId: o.id,
           code: o.code,
           city: o.city,
-          aliases: (o.aliases || []).map((a) => a.raw_alias),
-          source: 'database',
+          aliases: (o.aliases || []).map((a: any) => a.raw_alias),
+          source: 'database' as const,
           individual_sales: 0,
           combo_sales: 0,
           total_sales_qty: 0,
@@ -72,7 +91,9 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
         }));
         setDbOutlets(mapped);
       })
-      .catch(() => {});
+      .catch(() => {
+        // Built-in outlets already set above — search still works
+      });
     return () => {
       cancelled = true;
     };

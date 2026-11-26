@@ -10,6 +10,7 @@ import {
   fuzzyOutletScore,
   normalizeOutletStr,
 } from '../utils/outletFuzzy';
+import { BUILT_IN_OUTLETS } from '../data/builtInOutlets';
 
 interface AllOutletsPageProps {
   onSelectOutlet: (outletId: number) => void;
@@ -31,19 +32,33 @@ export const AllOutletsPage: React.FC<AllOutletsPageProps> = ({ onSelectOutlet }
   const pageSize = 25;
 
   useEffect(() => {
+    // ── Step 1: Seed built-in outlets immediately ──
+    const builtIn: AllOutletsRow[] = BUILT_IN_OUTLETS.map((o, idx) => ({
+      id: -(idx + 1000),
+      official_name: o.outlet,
+      code: o.code ?? undefined,
+      city: o.city ?? undefined,
+      sales_amount: 0,
+      purchase_amount: 0,
+      sales_qty: 0,
+      purchase_qty: 0,
+      diff_amount: 0,
+      items_sold_count: 0,
+      items_purchased_count: 0,
+    }));
+    setDbOutlets(builtIn);
+    setLoading(false);
+
+    // ── Step 2: Enrich from API if online ──
     let cancelled = false;
-    setLoading(true);
     fetchAllOutlets('', 'sales_amount', 'desc', 1, 500)
       .then((res) => {
-        if (!cancelled && Array.isArray(res?.outlets)) {
+        if (!cancelled && Array.isArray(res?.outlets) && res.outlets.length > 0) {
           setDbOutlets(res.outlets);
         }
       })
       .catch(() => {
-        // Backend DB may be empty or offline; uploaded Excel outlets still work
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        // Built-in outlets already loaded — table still works
       });
     return () => {
       cancelled = true;
