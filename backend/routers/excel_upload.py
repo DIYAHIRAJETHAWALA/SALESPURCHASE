@@ -128,6 +128,21 @@ def _detect_report_type(filename: str) -> str:
     return "sales"
 
 
+def _pick_header_row_idx(rows: List[List[Any]]) -> int:
+    """Pick the real table header row in the first 15 rows."""
+    keywords = ("outlet", "location", "branch", "store", "item", "product", "sales", "purchase", "qty")
+    best_idx = 0
+    best_count = -1
+    for idx, r in enumerate(rows[:15]):
+        non_empty = [str(c).strip() for c in r if c is not None and str(c).strip() != ""]
+        if any(any(kw in cell.lower() for kw in keywords) for cell in non_empty) and len(non_empty) >= 2:
+            return idx
+        if len(non_empty) > best_count:
+            best_count = len(non_empty)
+            best_idx = idx
+    return best_idx
+
+
 def _extract_generic_sheets(contents: bytes, filename: str) -> List[Dict[str, Any]]:
     """Fallback parser: extract every sheet or CSV as a generic table."""
     sheets_out: List[Dict[str, Any]] = []
@@ -135,12 +150,7 @@ def _extract_generic_sheets(contents: bytes, filename: str) -> List[Dict[str, An
         text = contents.decode("utf-8-sig", errors="replace")
         all_rows = [r for r in csv.reader(io.StringIO(text)) if any(str(c).strip() for c in r)]
         if all_rows:
-            # Find first row with >= 2 non-empty cells as header
-            hdr_idx = 0
-            for idx, r in enumerate(all_rows[:15]):
-                if sum(1 for c in r if str(c).strip()) >= 2:
-                    hdr_idx = idx
-                    break
+            hdr_idx = _pick_header_row_idx(all_rows)
             headers = [str(c).strip() or f"Col {i+1}" for i, c in enumerate(all_rows[hdr_idx])]
             data_rows = []
             for r in all_rows[hdr_idx + 1:]:
@@ -159,11 +169,7 @@ def _extract_generic_sheets(contents: bytes, filename: str) -> List[Dict[str, An
                 all_rows.append(list(row))
         if not all_rows:
             continue
-        hdr_idx = 0
-        for idx, r in enumerate(all_rows[:15]):
-            if sum(1 for c in r if c is not None and str(c).strip() != "") >= 2:
-                hdr_idx = idx
-                break
+        hdr_idx = _pick_header_row_idx(all_rows)
         raw_hdr = all_rows[hdr_idx]
         # Trim trailing empty columns
         last_non_empty = len(raw_hdr) - 1

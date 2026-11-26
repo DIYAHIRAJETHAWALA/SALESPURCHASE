@@ -1,13 +1,26 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search, Store, Upload, X, FileSpreadsheet, ChevronRight,
-  TrendingUp, Package, Percent, AlertCircle, Loader2, ArrowRight, Database
+  TrendingUp, Package, Percent, AlertCircle, Loader2, ArrowRight, Database, Utensils
 } from 'lucide-react';
-import { useUploadedData, UploadResult } from '../context/UploadedDataContext';
+import { useUploadedData, UploadResult, ItemRow } from '../context/UploadedDataContext';
 import { fetchOutletsList } from '../api';
+import { fuzzyOutletScore, isTotalRowLabel, normalizeOutletStr } from '../utils/outletFuzzy';
 
 interface OutletSearchPageProps {
   onSelectOutlet?: (outletId: number) => void;
+}
+
+interface OutletItemDetail {
+  name: string;
+  category: string;
+  size: string;
+  individual_sales: number;
+  combo_sales: number;
+  sales_qty: number;
+  purchase_packs: number;
+  purchase_units: number;
+  rmd_pct: number;
 }
 
 interface OutletRow {
@@ -23,114 +36,8 @@ interface OutletRow {
   purchase_packs: number;
   purchase_units: number;
   rmd_pct: number;
+  items: OutletItemDetail[];
   rawMetrics?: Array<{ label: string; value: string }>;
-}
-
-function normalizeStr(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[\-().,_/\\]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    let prev = dp[0];
-    dp[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const temp = dp[j];
-      if (a[i - 1] === b[j - 1]) {
-        dp[j] = prev;
-      } else {
-        dp[j] = 1 + Math.min(prev, dp[j], dp[j - 1]);
-      }
-      prev = temp;
-    }
-  }
-  return dp[n];
-}
-
-// Fuzzy & partial match scorer (case-insensitive, punctuation-insensitive, typo-tolerant)
-function fuzzyScore(query: string, text: string): number {
-  if (!query || !text) return 0;
-  const q = normalizeStr(query);
-  const t = normalizeStr(text);
-  if (!q || !t) return 0;
-
-  if (q === t) return 100;
-  if (t.includes(q)) return 92;
-
-  const qCompact = q.replace(/\s/g, '');
-  const tCompact = t.replace(/\s/g, '');
-  if (tCompact.includes(qCompact)) return 88;
-
-  const qWords = q.split(' ').filter(Boolean);
-  const tWords = t.split(' ').filter(Boolean);
-
-  // Word-level matching (exact substring or small typo)
-  let wordScoreSum = 0;
-  let matchedWords = 0;
-  for (const qw of qWords) {
-    let bestWordScore = 0;
-    for (const tw of tWords) {
-      if (tw === qw) {
-        bestWordScore = 1.0;
-        break;
-      }
-      if (tw.includes(qw) || (qw.length >= 3 && qw.includes(tw))) {
-        bestWordScore = Math.max(bestWordScore, 0.9);
-      } else if (qw.length >= 3 && tw.length >= 3) {
-        const dist = levenshtein(qw, tw);
-        const maxLen = Math.max(qw.length, tw.length);
-        if (dist <= 2 && dist / maxLen <= 0.45) {
-          bestWordScore = Math.max(bestWordScore, 1 - dist / maxLen);
-        } else if (tw.startsWith(qw.slice(0, 2)) && dist <= 3) {
-          bestWordScore = Math.max(bestWordScore, 0.65);
-        }
-      }
-    }
-    if (bestWordScore > 0) matchedWords++;
-    wordScoreSum += bestWordScore;
-  }
-
-  if (matchedWords === qWords.length && qWords.length > 0) {
-    return Math.round(70 + (wordScoreSum / qWords.length) * 18);
-  }
-  if (matchedWords > 0 && qWords.length > 0) {
-    return Math.round((wordScoreSum / qWords.length) * 72);
-  }
-
-  // Initials / prefix match (e.g. "LP S" -> "L P SAVANI")
-  const firstLetters = tWords.map(w => w[0]).join('');
-  if (firstLetters.includes(qCompact)) return 78;
-
-  // Ordered character subsequence match in compact form (e.g. "lps" -> "lpsavani")
-  let qi = 0;
-  for (let ti = 0; ti < tCompact.length && qi < qCompact.length; ti++) {
-    if (tCompact[ti] === qCompact[qi]) qi++;
-  }
-  if (qi === qCompact.length && qCompact.length >= 2) {
-    return 68;
-  }
-
-  return 0;
-}
-
-function isTotalLabel(name: string): boolean {
-  const low = name.trim().toLowerCase();
-  return (
-    !low ||
-    low === 'total' ||
-    low === 'grand total' ||
-    low.startsWith('total ') ||
-    low.startsWith('grand total')
-  );
 }
 
 export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutlet }) => {
@@ -139,10 +46,10 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [itemFilter, setItemFilter] = useState('');
   const [selectedOutlet, setSelectedOutlet] = useState<OutletRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load any outlets stored in backend DB so search works even without uploading an Excel
   useEffect(() => {
     let cancelled = false;
     fetchOutletsList()
@@ -161,27 +68,53 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
           purchase_packs: 0,
           purchase_units: 0,
           rmd_pct: 0,
+          items: [],
         }));
         setDbOutlets(mapped);
       })
-      .catch(() => {
-        // Backend may be offline or empty; Excel upload still works
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Build flat list of all outlets from uploaded files (both structured `outlets` and generic `raw_sheets`) + DB outlets
+  // Merge all outlets AND their food items across ALL uploaded Excel/CSV files + DB outlets
   const allOutlets = useMemo<OutletRow[]>(() => {
     const byKey = new Map<string, OutletRow>();
 
-    // 1. Structured outlets from uploaded Excel/CSV files
     for (const ds of datasets) {
+      const catLabel = ds.category || ds.filename;
+
+      // 1. Structured outlets
       for (const o of ds.outlets || []) {
-        const key = normalizeStr(o.outlet);
-        if (!key || isTotalLabel(o.outlet)) continue;
-        if (!byKey.has(key)) {
+        const key = normalizeOutletStr(o.outlet);
+        if (!key || isTotalRowLabel(o.outlet)) continue;
+
+        const mappedItems: OutletItemDetail[] = (o.items || []).map((it: ItemRow) => ({
+          name: it.name,
+          category: catLabel,
+          size: it.size || '',
+          individual_sales: it.individual_sales ?? 0,
+          combo_sales: it.combo_sales ?? 0,
+          sales_qty: it.sales_qty ?? 0,
+          purchase_packs: it.purchase_packs ?? 0,
+          purchase_units: it.purchase_units ?? 0,
+          rmd_pct: it.rmd_pct ?? 0,
+        }));
+
+        const existing = byKey.get(key);
+        if (existing) {
+          existing.individual_sales += o.summary?.individual_sales ?? 0;
+          existing.combo_sales += o.summary?.combo_sales ?? 0;
+          existing.total_sales_qty += o.summary?.total_sales_qty ?? 0;
+          existing.purchase_packs += o.summary?.purchase_packs ?? 0;
+          existing.purchase_units += o.summary?.purchase_units ?? 0;
+          existing.rmd_pct =
+            existing.purchase_units > 0
+              ? Math.round((existing.total_sales_qty / existing.purchase_units) * 10000) / 100
+              : existing.rmd_pct;
+          existing.items.push(...mappedItems);
+        } else {
           byKey.set(key, {
             outlet: o.outlet,
             source: 'excel',
@@ -191,11 +124,12 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
             purchase_packs: o.summary?.purchase_packs ?? 0,
             purchase_units: o.summary?.purchase_units ?? 0,
             rmd_pct: o.summary?.rmd_pct ?? 0,
+            items: mappedItems,
           });
         }
       }
 
-      // 2. Generic / raw_sheets fallback (e.g. matrix Excel with OUTLET NAME | VEG BURGER | COFFEE 25 ...)
+      // 2. Generic / raw_sheets fallback (matrix or summary spreadsheets)
       if ((!ds.outlets || ds.outlets.length === 0) && ds.raw_sheets && ds.raw_sheets.length > 0) {
         for (const sheet of ds.raw_sheets) {
           const headers = sheet.headers || [];
@@ -208,33 +142,63 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
               low.includes('outlet') ||
               low.includes('location') ||
               low.includes('branch') ||
-              low.includes('store')
+              low.includes('store') ||
+              low.includes('franchise')
             );
           });
+          // Fallback: pick first column that contains non-numeric text values
+          if (outletColIdx === -1) {
+            outletColIdx = headers.findIndex((_, cIdx) =>
+              rows.slice(0, 10).some((r) => {
+                const v = String(r[cIdx] ?? '').trim();
+                return v.length > 2 && !/^[\d.,\-%₹$]+$/.test(v);
+              })
+            );
+          }
           if (outletColIdx === -1) outletColIdx = 0;
 
           for (const row of rows) {
             const rawName = String(row[outletColIdx] ?? '').trim();
-            if (!rawName || isTotalLabel(rawName)) continue;
-            // Skip purely numeric first cells
-            if (/^[\d.,\-%]+$/.test(rawName)) continue;
+            if (!rawName || isTotalRowLabel(rawName)) continue;
+            if (/^[\d.,\-%₹$]+$/.test(rawName)) continue;
 
-            const key = normalizeStr(rawName);
+            const key = normalizeOutletStr(rawName);
             if (!key) continue;
 
             const rawMetrics: Array<{ label: string; value: string }> = [];
+            const rowItems: OutletItemDetail[] = [];
             let rowSum = 0;
             headers.forEach((h, cIdx) => {
               if (cIdx === outletColIdx) return;
               const val = String(row[cIdx] ?? '').trim();
+              const label = h || `Col ${cIdx + 1}`;
               if (h || val) {
-                rawMetrics.push({ label: h || `Col ${cIdx + 1}`, value: val || '0' });
-                const num = parseFloat(val.replace(/,/g, ''));
-                if (!isNaN(num)) rowSum += num;
+                rawMetrics.push({ label, value: val || '0' });
+                const num = parseFloat(val.replace(/[₹$,%]/g, '').replace(/,/g, ''));
+                if (!isNaN(num)) {
+                  rowSum += num;
+                  rowItems.push({
+                    name: label,
+                    category: sheet.sheet_name || catLabel,
+                    size: '',
+                    individual_sales: num,
+                    combo_sales: 0,
+                    sales_qty: num,
+                    purchase_packs: 0,
+                    purchase_units: 0,
+                    rmd_pct: 0,
+                  });
+                }
               }
             });
 
-            if (!byKey.has(key)) {
+            const existing = byKey.get(key);
+            if (existing) {
+              existing.total_sales_qty += rowSum;
+              existing.items.push(...rowItems);
+              if (!existing.rawMetrics) existing.rawMetrics = [];
+              existing.rawMetrics.push(...rawMetrics);
+            } else {
               byKey.set(key, {
                 outlet: rawName,
                 source: 'excel',
@@ -244,6 +208,7 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
                 purchase_packs: 0,
                 purchase_units: 0,
                 rmd_pct: 0,
+                items: rowItems,
                 rawMetrics,
               });
             }
@@ -252,9 +217,9 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
       }
     }
 
-    // 3. Merge DB outlets (don't overwrite Excel rows, just add DB metadata or missing outlets)
+    // 3. Merge DB outlets
     for (const dbo of dbOutlets) {
-      const key = normalizeStr(dbo.outlet);
+      const key = normalizeOutletStr(dbo.outlet);
       if (!key) continue;
       const existing = byKey.get(key);
       if (existing) {
@@ -270,25 +235,44 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
     return Array.from(byKey.values());
   }, [datasets, dbOutlets]);
 
+  // Keep selectedOutlet synced when datasets change
+  const activeOutlet = useMemo(() => {
+    if (!selectedOutlet) return null;
+    const key = normalizeOutletStr(selectedOutlet.outlet);
+    return allOutlets.find((o) => normalizeOutletStr(o.outlet) === key) || selectedOutlet;
+  }, [selectedOutlet, allOutlets]);
+
   // Fuzzy search results across outlet name, code, city, and aliases
   const searchResults = useMemo<Array<OutletRow & { score: number }>>(() => {
     const q = query.trim();
     if (!q) return allOutlets.map((o) => ({ ...o, score: 100 }));
     return allOutlets
       .map((o) => {
-        let best = fuzzyScore(q, o.outlet);
-        if (o.code) best = Math.max(best, fuzzyScore(q, o.code));
-        if (o.city) best = Math.max(best, fuzzyScore(q, o.city));
+        let best = fuzzyOutletScore(q, o.outlet);
+        if (o.code) best = Math.max(best, fuzzyOutletScore(q, o.code));
+        if (o.city) best = Math.max(best, fuzzyOutletScore(q, o.city));
         if (o.aliases) {
           for (const a of o.aliases) {
-            best = Math.max(best, fuzzyScore(q, a));
+            best = Math.max(best, fuzzyOutletScore(q, a));
           }
         }
         return { ...o, score: best };
       })
-      .filter((o) => o.score >= 55)
+      .filter((o) => o.score >= 50)
       .sort((a, b) => b.score - a.score);
   }, [query, allOutlets]);
+
+  const filteredItems = useMemo(() => {
+    if (!activeOutlet) return [];
+    const f = itemFilter.trim().toLowerCase();
+    if (!f) return activeOutlet.items;
+    return activeOutlet.items.filter(
+      (it) =>
+        it.name.toLowerCase().includes(f) ||
+        it.category.toLowerCase().includes(f) ||
+        it.size.toLowerCase().includes(f)
+    );
+  }, [activeOutlet, itemFilter]);
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -332,7 +316,8 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
   const fileNames = datasets.map((d) => d.filename);
 
   const handleSelectRow = (o: OutletRow) => {
-    if (o.source === 'database' && o.dbId && onSelectOutlet && !o.rawMetrics) {
+    setItemFilter('');
+    if (o.source === 'database' && o.dbId && onSelectOutlet && o.items.length === 0 && !o.rawMetrics) {
       onSelectOutlet(o.dbId);
     } else {
       setSelectedOutlet(o);
@@ -348,7 +333,7 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
         </div>
         <h1 className="text-2xl font-extrabold text-slate-900">Outlet Search</h1>
         <p className="text-slate-500 text-sm max-w-lg mx-auto">
-          Search any outlet by name, short form, or spelling — works with uploaded Excel/CSV files and saved database outlets.
+          Search any outlet (e.g. LP Savani, lp savani, Adajan, Nanpura) to view its full sales, purchase, and all food items.
         </p>
       </div>
 
@@ -403,13 +388,13 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
                 <p className="text-xs mt-1">Try fewer letters or a different part of the name</p>
               </div>
             ) : (
-              <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
-                {searchResults.slice(0, 40).map((o, idx) => (
+              <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                {searchResults.slice(0, 50).map((o, idx) => (
                   <button
                     key={o.outlet + idx}
                     onClick={() => handleSelectRow(o)}
                     className={`w-full text-left p-3.5 flex items-center justify-between hover:bg-blue-50/60 transition-colors ${
-                      selectedOutlet?.outlet === o.outlet ? 'bg-blue-50 border-l-2 border-blue-500' : ''
+                      activeOutlet?.outlet === o.outlet ? 'bg-blue-50 border-l-2 border-blue-500' : ''
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -425,7 +410,7 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
                             </>
                           ) : (
                             <>
-                              <FileSpreadsheet className="w-3 h-3" /> From Uploaded File
+                              <FileSpreadsheet className="w-3 h-3" /> {o.items.length} food items
                             </>
                           )}
                           {o.city ? ` • ${o.city}` : ''}
@@ -479,7 +464,7 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
               Drop Excel / CSV here, or click to upload
             </p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Supports .xlsx .xlsm .xls .csv — files uploaded in Excel Upload & Viewer also appear here automatically
+              Upload one or multiple reports (e.g. Burgers, Beverages, All Outlets) — food items merge per outlet
             </p>
           </>
         )}
@@ -544,23 +529,25 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
         </div>
       )}
 
-      {/* Detail panel for selected outlet */}
-      {selectedOutlet && (
-        <div className="bg-white rounded-xl border border-blue-200 shadow-md p-5 space-y-4">
+      {/* Detail panel for selected outlet WITH ALL FOOD ITEMS */}
+      {activeOutlet && (
+        <div className="bg-white rounded-xl border border-blue-200 shadow-md p-5 space-y-5">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
                 <Store className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="font-bold text-slate-900">{selectedOutlet.outlet}</h2>
-                <p className="text-xs text-slate-400">Outlet Analytics Summary</p>
+                <h2 className="font-bold text-slate-900">{activeOutlet.outlet}</h2>
+                <p className="text-xs text-slate-400">
+                  Outlet Analytics Summary • {activeOutlet.items.length} Food Items
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {selectedOutlet.dbId && onSelectOutlet && (
+              {activeOutlet.dbId && onSelectOutlet && (
                 <button
-                  onClick={() => onSelectOutlet(selectedOutlet.dbId!)}
+                  onClick={() => onSelectOutlet(activeOutlet.dbId!)}
                   className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
                   Open Full Analytics
@@ -575,23 +562,69 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
             </div>
           </div>
 
-          {selectedOutlet.rawMetrics && selectedOutlet.rawMetrics.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {selectedOutlet.rawMetrics.map((m, i) => (
-                <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-[11px] font-semibold text-slate-500 truncate">{m.label}</div>
-                  <div className="text-base font-bold text-slate-900 mt-0.5">{m.value}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Individual Sales" value={selectedOutlet.individual_sales} color="blue" />
-              <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Combo Sales" value={selectedOutlet.combo_sales} color="indigo" />
-              <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Total Sales Qty" value={selectedOutlet.total_sales_qty} color="emerald" />
-              <StatCard icon={<Package className="w-4 h-4" />} label="Purchase Packs" value={selectedOutlet.purchase_packs} color="amber" />
-              <StatCard icon={<Package className="w-4 h-4" />} label="Purchase Units" value={selectedOutlet.purchase_units} color="orange" />
-              <StatCard icon={<Percent className="w-4 h-4" />} label="RMD %" value={`${selectedOutlet.rmd_pct.toFixed(2)}%`} color="rose" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Individual Sales" value={activeOutlet.individual_sales} color="blue" />
+            <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Combo Sales" value={activeOutlet.combo_sales} color="indigo" />
+            <StatCard icon={<TrendingUp className="w-4 h-4" />} label="Total Sales Qty" value={activeOutlet.total_sales_qty} color="emerald" />
+            <StatCard icon={<Package className="w-4 h-4" />} label="Purchase Packs" value={activeOutlet.purchase_packs} color="amber" />
+            <StatCard icon={<Package className="w-4 h-4" />} label="Purchase Units" value={activeOutlet.purchase_units} color="orange" />
+            <StatCard icon={<Percent className="w-4 h-4" />} label="RMD %" value={`${activeOutlet.rmd_pct.toFixed(2)}%`} color="rose" />
+          </div>
+
+          {/* Food Items Table */}
+          {activeOutlet.items.length > 0 && (
+            <div className="space-y-2.5 pt-2 border-t border-slate-100">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <Utensils className="w-4 h-4 text-blue-600" />
+                  Food Items for {activeOutlet.outlet} ({filteredItems.length})
+                </h3>
+                <input
+                  type="text"
+                  value={itemFilter}
+                  onChange={(e) => setItemFilter(e.target.value)}
+                  placeholder="Filter food items..."
+                  className="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none focus:bg-white focus:border-blue-500 w-full sm:w-56"
+                />
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-slate-200 max-h-96 overflow-y-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-100 text-slate-700 font-semibold sticky top-0">
+                    <tr>
+                      <th className="py-2.5 px-3">Food Item</th>
+                      <th className="py-2.5 px-3">Category / Sheet</th>
+                      <th className="py-2.5 px-3 text-right">Indiv Sales</th>
+                      <th className="py-2.5 px-3 text-right">Combo Sales</th>
+                      <th className="py-2.5 px-3 text-right">Total Sales</th>
+                      <th className="py-2.5 px-3 text-right">Purch Packs</th>
+                      <th className="py-2.5 px-3 text-right">Purch Units</th>
+                      <th className="py-2.5 px-3 text-right">RMD %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredItems.map((it, idx) => (
+                      <tr key={`${it.name}-${idx}`} className="hover:bg-slate-50">
+                        <td className="py-2 px-3 font-semibold text-slate-800">
+                          {it.name}
+                          {it.size && (
+                            <span className="ml-1.5 text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              {it.size}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-slate-500">{it.category}</td>
+                        <td className="py-2 px-3 text-right text-slate-700">{it.individual_sales.toLocaleString()}</td>
+                        <td className="py-2 px-3 text-right text-purple-600">{it.combo_sales.toLocaleString()}</td>
+                        <td className="py-2 px-3 text-right font-bold text-emerald-700">{it.sales_qty.toLocaleString()}</td>
+                        <td className="py-2 px-3 text-right text-slate-700">{it.purchase_packs.toLocaleString()}</td>
+                        <td className="py-2 px-3 text-right font-semibold text-amber-700">{it.purchase_units.toLocaleString()}</td>
+                        <td className="py-2 px-3 text-right font-bold text-slate-900">{it.rmd_pct.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
