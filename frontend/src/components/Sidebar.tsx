@@ -4,6 +4,7 @@ import {
   FileSpreadsheet,
   TableProperties,
   Layers,
+  Scale,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -18,6 +19,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
     { id: 'category_analysis', label: 'Category & Recipe BI', icon: Layers },
     { id: 'master_merged', label: 'Merged S&P Table', icon: TableProperties },
     { id: 'outlet_search', label: 'Outlet Search', icon: Search },
+    { id: 'compare_dispatch', label: 'Compare & Dispatch', icon: Scale },
   ];
 
   return (
