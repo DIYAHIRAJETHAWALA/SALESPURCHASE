@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
+import { UploadedDataProvider } from './context/UploadedDataContext';
 import { CategoryAnalysisPage } from './pages/CategoryAnalysisPage';
 import { CategoryUploadPage } from './pages/CategoryUploadPage';
 import { CombinedUploadPage } from './pages/CombinedUploadPage';
@@ -87,12 +88,14 @@ export function App() {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900">
-      <Sidebar currentPage={currentPage} onNavigate={handleNavigate} />
-      <main className="flex-1 min-w-0 overflow-y-auto">
-        {renderContent()}
-      </main>
-    </div>
+    <UploadedDataProvider>
+      <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900">
+        <Sidebar currentPage={currentPage} onNavigate={handleNavigate} />
+        <main className="flex-1 min-w-0 overflow-y-auto">
+          {renderContent()}
+        </main>
+      </div>
+    </UploadedDataProvider>
   );
 }
 

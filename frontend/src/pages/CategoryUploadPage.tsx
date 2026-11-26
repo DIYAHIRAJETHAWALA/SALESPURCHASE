@@ -1,5 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
+  useUploadedData,
+  UploadResult,
+  OutletData,
+  ItemRow,
+} from '../context/UploadedDataContext';
+import {
   UploadCloud,
   Store,
   Search,
@@ -14,58 +20,8 @@ import {
   X,
 } from 'lucide-react';
 
-interface ItemRow {
-  name: string;
-  size: string;
-  menu_ref: string;
-  individual_sales: number;
-  combo_sales: number;
-  sales_qty: number;
-  purchase_packs: number;
-  purchase_units: number;
-  rmd_pct: number;
-  size_breakdown: Record<string, number>;
-}
-
-interface OutletSummary {
-  individual_sales: number;
-  combo_sales: number;
-  total_sales_qty: number;
-  purchase_packs: number;
-  purchase_units: number;
-  rmd_pct: number;
-  size_breakdown: Record<string, number>;
-}
-
-interface OutletData {
-  outlet: string;
-  summary: OutletSummary;
-  items: ItemRow[];
-}
-
-interface RawSheet {
-  sheet_name: string;
-  headers: string[];
-  rows: string[][];
-}
-
-interface UploadResult {
-  mode?: string;
-  report_type?: string;
-  category: string;
-  filename: string;
-  period_label: string;
-  start_date: string;
-  end_date: string;
-  week_label: string;
-  month_label: string;
-  size_headers: string[];
-  outlets: OutletData[];
-  raw_sheets?: RawSheet[];
-}
-
 export const CategoryUploadPage: React.FC = () => {
-  const [datasets, setDatasets] = useState<UploadResult[]>([]);
+  const { datasets, setDatasets } = useUploadedData();
   const [activeCategoryIdx, setActiveCategoryIdx] = useState<number>(0);
   const [activeRawSheetIdx, setActiveRawSheetIdx] = useState<number>(0);
   const [selectedOutlet, setSelectedOutlet] = useState<string>('');
