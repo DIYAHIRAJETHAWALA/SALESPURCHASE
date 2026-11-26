@@ -1,9 +1,11 @@
+import csv
 import io
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 import openpyxl
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from backend.parsers.manager import ParserManager
 
 router = APIRouter(prefix="/api", tags=["Excel Upload"])
 
@@ -21,8 +23,7 @@ def _parse_date_from_text(text: str) -> Optional[str]:
             try:
                 if len(groups[0]) == 4:
                     return f"{groups[0]}-{groups[1]}-{groups[2]}"
-                else:
-                    return f"{groups[2]}-{groups[1]}-{groups[0]}"
+                return f"{groups[2]}-{groups[1]}-{groups[0]}"
             except Exception:
                 pass
     return None
@@ -120,6 +121,71 @@ def _is_total_row(label: str) -> bool:
     return not low or low.startswith("total") or low.startswith("grand total")
 
 
+def _detect_report_type(filename: str) -> str:
+    low = filename.lower()
+    if any(k in low for k in ("order", "purchase", "indent", "material", "po_")):
+        return "purchase"
+    return "sales"
+
+
+def _extract_generic_sheets(contents: bytes, filename: str) -> List[Dict[str, Any]]:
+    """Fallback parser: extract every sheet or CSV as a generic table."""
+    sheets_out: List[Dict[str, Any]] = []
+    if filename.lower().endswith(".csv"):
+        text = contents.decode("utf-8-sig", errors="replace")
+        all_rows = [r for r in csv.reader(io.StringIO(text)) if any(str(c).strip() for c in r)]
+        if all_rows:
+            # Find first row with >= 2 non-empty cells as header
+            hdr_idx = 0
+            for idx, r in enumerate(all_rows[:15]):
+                if sum(1 for c in r if str(c).strip()) >= 2:
+                    hdr_idx = idx
+                    break
+            headers = [str(c).strip() or f"Col {i+1}" for i, c in enumerate(all_rows[hdr_idx])]
+            data_rows = []
+            for r in all_rows[hdr_idx + 1:]:
+                padded = [str(r[i]).strip() if i < len(r) and r[i] is not None else "" for i in range(len(headers))]
+                if any(padded):
+                    data_rows.append(padded)
+            sheets_out.append({"sheet_name": "CSV Data", "headers": headers, "rows": data_rows})
+        return sheets_out
+
+    wb = ParserManager._load_excel_workbook(contents, filename)
+    for sname in wb.sheetnames:
+        ws = wb[sname]
+        all_rows = []
+        for row in ws.iter_rows(values_only=True):
+            if any(c is not None and str(c).strip() != "" for c in row):
+                all_rows.append(list(row))
+        if not all_rows:
+            continue
+        hdr_idx = 0
+        for idx, r in enumerate(all_rows[:15]):
+            if sum(1 for c in r if c is not None and str(c).strip() != "") >= 2:
+                hdr_idx = idx
+                break
+        raw_hdr = all_rows[hdr_idx]
+        # Trim trailing empty columns
+        last_non_empty = len(raw_hdr) - 1
+        while last_non_empty >= 0 and (raw_hdr[last_non_empty] is None or str(raw_hdr[last_non_empty]).strip() == ""):
+            last_non_empty -= 1
+        col_count = max(last_non_empty + 1, 1)
+        headers = [
+            str(raw_hdr[i]).replace("\n", " ").strip() if i < len(raw_hdr) and raw_hdr[i] is not None else f"Col {i+1}"
+            for i in range(col_count)
+        ]
+        data_rows = []
+        for r in all_rows[hdr_idx + 1:]:
+            padded = [
+                "" if (i >= len(r) or r[i] is None or str(r[i]).startswith("=")) else str(r[i]).strip()
+                for i in range(col_count)
+            ]
+            if any(padded):
+                data_rows.append(padded)
+        sheets_out.append({"sheet_name": sname, "headers": headers, "rows": data_rows})
+    return sheets_out
+
+
 @router.post("/excel-upload")
 async def upload_excel(
     file: UploadFile = File(...),
@@ -127,24 +193,34 @@ async def upload_excel(
     start_date: str = Form(default=""),
     end_date: str = Form(default=""),
 ) -> Dict[str, Any]:
-    """Parse an uploaded category outlet report (.xlsx) and return per-outlet items,
-    including individual sales, combo sales, purchase packs/units, and RMD %.
+    """Parse ANY uploaded Excel/CSV report (.xlsx, .xlsm, .xls, .csv):
+    1. Category Outlet Reports (SUMMARY + per-item sheets)
+    2. Any Sales/Purchase Matrix or Flat Tabular report via ParserManager
+    3. Any unknown spreadsheet as a universal searchable table
     """
     filename = file.filename or "Uploaded_Report.xlsx"
-    if not filename.lower().endswith((".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="Only .xlsx or .xlsm Excel files are supported.")
+    low_name = filename.lower()
+    if not low_name.endswith((".xlsx", ".xlsm", ".xls", ".csv")):
+        raise HTTPException(
+            status_code=400,
+            detail="Supported formats: .xlsx, .xlsm, .xls, .csv",
+        )
 
     contents = await file.read()
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read Excel file: {e}")
-
-    category = filename.replace("_Outlet_Report.xlsx", "").replace(".xlsx", "").replace("_", " ").strip()
+    category = (
+        filename.replace("_Outlet_Report.xlsx", "")
+        .replace(".xlsx", "")
+        .replace(".xlsm", "")
+        .replace(".xls", "")
+        .replace(".csv", "")
+        .replace("_", " ")
+        .strip()
+    )
 
     outlets_map: Dict[str, Dict[str, Any]] = {}
     outlet_order: List[str] = []
     size_headers: List[str] = []
+    mode = "category_report"
 
     def ensure_outlet(name: str) -> Dict[str, Any]:
         if name not in outlets_map:
@@ -164,16 +240,69 @@ async def upload_excel(
             outlet_order.append(name)
         return outlets_map[name]
 
-    # 1. Parse SUMMARY sheet if present
-    if "SUMMARY" in wb.sheetnames:
-        ws_sum = wb["SUMMARY"]
-        h_row = _find_header_row(ws_sum)
-        if h_row:
-            headers = [ws_sum.cell(h_row, c).value for c in range(1, ws_sum.max_column + 1)]
-            cols = _map_columns(headers)
-            size_headers = [sc["label"] for sc in cols["size_cols"]]
-            if cols["outlet"] != -1:
-                for row in ws_sum.iter_rows(min_row=h_row + 1, values_only=True):
+    # --- Path 1: Category Outlet Report (.xlsx/.xlsm with Outlet Name rows) ---
+    if low_name.endswith((".xlsx", ".xlsm")):
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to read Excel file: {e}")
+
+        if "SUMMARY" in wb.sheetnames:
+            ws_sum = wb["SUMMARY"]
+            h_row = _find_header_row(ws_sum)
+            if h_row:
+                headers = [ws_sum.cell(h_row, c).value for c in range(1, ws_sum.max_column + 1)]
+                cols = _map_columns(headers)
+                if cols["outlet"] != -1 and (cols["indiv"] != -1 or cols["total"] != -1 or cols["units"] != -1):
+                    size_headers = [sc["label"] for sc in cols["size_cols"]]
+                    for row in ws_sum.iter_rows(min_row=h_row + 1, values_only=True):
+                        raw_name = row[cols["outlet"]] if cols["outlet"] < len(row) else None
+                        if not raw_name:
+                            continue
+                        outlet_name = str(raw_name).strip()
+                        if _is_total_row(outlet_name):
+                            continue
+
+                        entry = ensure_outlet(outlet_name)
+                        indiv = _extract_numeric(row[cols["indiv"]]) if cols["indiv"] != -1 else 0.0
+                        combo = _extract_numeric(row[cols["combo"]]) if cols["combo"] != -1 else 0.0
+                        total_val = _extract_numeric(row[cols["total"]]) if cols["total"] != -1 else 0.0
+                        sales_qty = total_val if total_val > 0 else (indiv + combo)
+                        packs = _extract_numeric(row[cols["packs"]]) if cols["packs"] != -1 else 0.0
+                        units = _extract_numeric(row[cols["units"]]) if cols["units"] != -1 else 0.0
+                        rmd_pct = round((sales_qty / units) * 100, 2) if units > 0 else 0.0
+
+                        size_bd = {
+                            sc["label"]: _extract_numeric(row[sc["idx"]]) if sc["idx"] < len(row) else 0.0
+                            for sc in cols["size_cols"]
+                        }
+                        entry["summary"] = {
+                            "individual_sales": indiv,
+                            "combo_sales": combo,
+                            "total_sales_qty": sales_qty,
+                            "purchase_packs": packs,
+                            "purchase_units": units,
+                            "rmd_pct": rmd_pct,
+                            "size_breakdown": size_bd,
+                        }
+
+        if outlet_order:
+            for sheet_name in wb.sheetnames:
+                if sheet_name.strip().upper() == "SUMMARY":
+                    continue
+                ws = wb[sheet_name]
+                h_row = _find_header_row(ws)
+                if not h_row:
+                    continue
+                headers = [ws.cell(h_row, c).value for c in range(1, ws.max_column + 1)]
+                cols = _map_columns(headers)
+                if cols["outlet"] == -1:
+                    continue
+                if not size_headers and cols["size_cols"]:
+                    size_headers = [sc["label"] for sc in cols["size_cols"]]
+                meta = _parse_item_metadata(ws, sheet_name)
+
+                for row in ws.iter_rows(min_row=h_row + 1, values_only=True):
                     raw_name = row[cols["outlet"]] if cols["outlet"] < len(row) else None
                     if not raw_name:
                         continue
@@ -189,86 +318,105 @@ async def upload_excel(
                     packs = _extract_numeric(row[cols["packs"]]) if cols["packs"] != -1 else 0.0
                     units = _extract_numeric(row[cols["units"]]) if cols["units"] != -1 else 0.0
                     rmd_pct = round((sales_qty / units) * 100, 2) if units > 0 else 0.0
-
                     size_bd = {
                         sc["label"]: _extract_numeric(row[sc["idx"]]) if sc["idx"] < len(row) else 0.0
                         for sc in cols["size_cols"]
                     }
-                    entry["summary"] = {
+                    entry["items"].append({
+                        "name": meta["name"],
+                        "size": meta["size"],
+                        "menu_ref": meta["menu_ref"],
                         "individual_sales": indiv,
                         "combo_sales": combo,
-                        "total_sales_qty": sales_qty,
+                        "sales_qty": sales_qty,
                         "purchase_packs": packs,
                         "purchase_units": units,
                         "rmd_pct": rmd_pct,
                         "size_breakdown": size_bd,
-                    }
+                    })
 
-    # 2. Parse each item sheet
-    for sheet_name in wb.sheetnames:
-        if sheet_name.strip().upper() == "SUMMARY":
-            continue
-        ws = wb[sheet_name]
-        h_row = _find_header_row(ws)
-        if not h_row:
-            continue
-
-        headers = [ws.cell(h_row, c).value for c in range(1, ws.max_column + 1)]
-        cols = _map_columns(headers)
-        if cols["outlet"] == -1:
-            continue
-
-        if not size_headers and cols["size_cols"]:
-            size_headers = [sc["label"] for sc in cols["size_cols"]]
-
-        meta = _parse_item_metadata(ws, sheet_name)
-
-        for row in ws.iter_rows(min_row=h_row + 1, values_only=True):
-            raw_name = row[cols["outlet"]] if cols["outlet"] < len(row) else None
-            if not raw_name:
-                continue
-            outlet_name = str(raw_name).strip()
-            if _is_total_row(outlet_name):
-                continue
-
-            entry = ensure_outlet(outlet_name)
-            indiv = _extract_numeric(row[cols["indiv"]]) if cols["indiv"] != -1 else 0.0
-            combo = _extract_numeric(row[cols["combo"]]) if cols["combo"] != -1 else 0.0
-            total_val = _extract_numeric(row[cols["total"]]) if cols["total"] != -1 else 0.0
-            sales_qty = total_val if total_val > 0 else (indiv + combo)
-            packs = _extract_numeric(row[cols["packs"]]) if cols["packs"] != -1 else 0.0
-            units = _extract_numeric(row[cols["units"]]) if cols["units"] != -1 else 0.0
-            rmd_pct = round((sales_qty / units) * 100, 2) if units > 0 else 0.0
-
-            size_bd = {
-                sc["label"]: _extract_numeric(row[sc["idx"]]) if sc["idx"] < len(row) else 0.0
-                for sc in cols["size_cols"]
-            }
-
-            entry["items"].append({
-                "name": meta["name"],
-                "size": meta["size"],
-                "menu_ref": meta["menu_ref"],
-                "individual_sales": indiv,
-                "combo_sales": combo,
-                "sales_qty": sales_qty,
-                "purchase_packs": packs,
-                "purchase_units": units,
-                "rmd_pct": rmd_pct,
-                "size_breakdown": size_bd,
-            })
+    # --- Path 2: Universal POS / Purchase / Sales Matrix or Flat Tabular via ParserManager ---
+    detected_start = start_date
+    detected_end = end_date
+    detected_report_type = _detect_report_type(filename)
 
     if not outlet_order:
-        raise HTTPException(
-            status_code=400,
-            detail="No outlet rows found in the uploaded Excel file. Please upload a category report from Outlet_Item_Reports.zip.",
-        )
+        try:
+            parsed = ParserManager.parse(
+                contents,
+                filename=filename,
+                report_type=detected_report_type,
+            )
+            if parsed.records:
+                mode = f"parsed_{detected_report_type}"
+                if not detected_start and parsed.start_date:
+                    detected_start = parsed.start_date
+                if not detected_end and parsed.end_date:
+                    detected_end = parsed.end_date
 
-    # Derive date info from filename if not supplied
-    detected_start = start_date or _parse_date_from_text(filename) or ""
-    detected_end = end_date or ""
+                # Group records by outlet -> item
+                grouped: Dict[str, Dict[str, Dict[str, Any]]] = {}
+                for rec in parsed.records:
+                    o_name = str(rec.outlet_raw or "Unknown Outlet").strip()
+                    i_name = str(rec.item_raw or "Unknown Item").strip()
+                    if o_name not in grouped:
+                        grouped[o_name] = {}
+                    if i_name not in grouped[o_name]:
+                        grouped[o_name][i_name] = {
+                            "name": i_name,
+                            "size": "",
+                            "menu_ref": f"₹{rec.unit_price:g}" if rec.unit_price else "",
+                            "individual_sales": 0.0,
+                            "combo_sales": 0.0,
+                            "sales_qty": 0.0,
+                            "purchase_packs": 0.0,
+                            "purchase_units": 0.0,
+                            "rmd_pct": 0.0,
+                            "size_breakdown": {},
+                        }
+                    item_entry = grouped[o_name][i_name]
+                    qty = float(rec.quantity or 0.0)
+                    if detected_report_type == "purchase":
+                        item_entry["purchase_packs"] += qty
+                        item_entry["purchase_units"] += qty
+                    else:
+                        item_entry["individual_sales"] += qty
+                        item_entry["sales_qty"] += qty
 
-    # Compute week label and month label from detected_start
+                for o_name, items_dict in grouped.items():
+                    entry = ensure_outlet(o_name)
+                    items_list = list(items_dict.values())
+                    entry["items"] = items_list
+                    tot_indiv = sum(it["individual_sales"] for it in items_list)
+                    tot_sales = sum(it["sales_qty"] for it in items_list)
+                    tot_packs = sum(it["purchase_packs"] for it in items_list)
+                    tot_units = sum(it["purchase_units"] for it in items_list)
+                    entry["summary"] = {
+                        "individual_sales": tot_indiv,
+                        "combo_sales": 0.0,
+                        "total_sales_qty": tot_sales,
+                        "purchase_packs": tot_packs,
+                        "purchase_units": tot_units,
+                        "rmd_pct": round((tot_sales / tot_units) * 100, 2) if tot_units > 0 else 0.0,
+                        "size_breakdown": {},
+                    }
+        except Exception:
+            pass
+
+    # --- Path 3: Generic Raw Table Fallback for ANY unknown spreadsheet ---
+    raw_sheets: List[Dict[str, Any]] = []
+    if not outlet_order:
+        mode = "generic_table"
+        try:
+            raw_sheets = _extract_generic_sheets(contents, filename)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+        if not raw_sheets:
+            raise HTTPException(status_code=400, detail="The uploaded file appears to be empty.")
+
+    if not detected_start:
+        detected_start = _parse_date_from_text(filename) or ""
+
     week_label = ""
     month_label = ""
     if detected_start:
@@ -281,6 +429,8 @@ async def upload_excel(
             pass
 
     return {
+        "mode": mode,
+        "report_type": detected_report_type,
         "category": category,
         "filename": filename,
         "period_label": period_label or detected_start or filename,
@@ -290,4 +440,5 @@ async def upload_excel(
         "month_label": month_label,
         "size_headers": size_headers,
         "outlets": [outlets_map[name] for name in outlet_order],
+        "raw_sheets": raw_sheets,
     }

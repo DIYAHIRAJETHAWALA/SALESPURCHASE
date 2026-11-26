@@ -43,7 +43,15 @@ interface OutletData {
   items: ItemRow[];
 }
 
+interface RawSheet {
+  sheet_name: string;
+  headers: string[];
+  rows: string[][];
+}
+
 interface UploadResult {
+  mode?: string;
+  report_type?: string;
   category: string;
   filename: string;
   period_label: string;
@@ -53,11 +61,13 @@ interface UploadResult {
   month_label: string;
   size_headers: string[];
   outlets: OutletData[];
+  raw_sheets?: RawSheet[];
 }
 
 export const CategoryUploadPage: React.FC = () => {
   const [datasets, setDatasets] = useState<UploadResult[]>([]);
   const [activeCategoryIdx, setActiveCategoryIdx] = useState<number>(0);
+  const [activeRawSheetIdx, setActiveRawSheetIdx] = useState<number>(0);
   const [selectedOutlet, setSelectedOutlet] = useState<string>('');
   const [selectedItem, setSelectedItem] = useState<string>('__SUMMARY__');
   // Date / period controls
@@ -103,6 +113,7 @@ export const CategoryUploadPage: React.FC = () => {
 
       setDatasets(uploaded);
       setActiveCategoryIdx(0);
+      setActiveRawSheetIdx(0);
       setSelectedOutlet(uploaded[0]?.outlets.length > 0 ? '__ALL__' : '');
       setSelectedItem('__SUMMARY__');
       setItemSearch('');
@@ -121,6 +132,7 @@ export const CategoryUploadPage: React.FC = () => {
 
   const handleCategorySwitch = (idx: number) => {
     setActiveCategoryIdx(idx);
+    setActiveRawSheetIdx(0);
     const nextData = datasets[idx];
     if (selectedOutlet !== '__ALL__' && nextData && !nextData.outlets.some((o) => o.outlet === selectedOutlet)) {
       setSelectedOutlet('__ALL__');
@@ -210,10 +222,10 @@ export const CategoryUploadPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2.5">
             <FileSpreadsheet className="w-7 h-7 text-blue-600" />
-            <span>Category Excel Outlet Viewer</span>
+            <span>Universal Excel &amp; CSV Viewer</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Upload any category Excel report (e.g. <span className="font-medium text-slate-700">Burgers_Outlet_Report.xlsx</span>), pick an outlet, and inspect all items, combos, sales, purchase quantities, and RMD %.
+            Upload any Excel or CSV file from anywhere (Outlet Reports, POS Sales, Purchase/Order Reports, or any custom sheet) to inspect sales, purchases, and RMD %.
           </p>
         </div>
 
@@ -246,10 +258,10 @@ export const CategoryUploadPage: React.FC = () => {
 
           <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-sm cursor-pointer transition-colors">
             <UploadCloud className="w-4 h-4" />
-            <span>{loading ? 'Processing...' : data ? 'Upload Another Excel' : 'Upload Category Excel'}</span>
+            <span>{loading ? 'Processing...' : data ? 'Upload Another File' : 'Upload Excel / CSV'}</span>
             <input
               type="file"
-              accept=".xlsx,.xlsm"
+              accept=".xlsx,.xlsm,.xls,.csv"
               multiple
               onChange={onFileChange}
               disabled={loading}
@@ -327,14 +339,14 @@ export const CategoryUploadPage: React.FC = () => {
         <label className="block border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white rounded-2xl p-12 text-center cursor-pointer transition-colors">
           <UploadCloud className="w-12 h-12 text-blue-500 mx-auto mb-3" />
           <p className="text-base font-semibold text-slate-800">
-            Click to upload a Category Excel file (.xlsx)
+            Click to upload any Excel or CSV file (.xlsx, .xls, .csv)
           </p>
           <p className="text-sm text-slate-500 mt-1">
-            All outlets, items, combos, purchase quantities, and RMD % are parsed instantly without downloading anything.
+            Works with Category Outlet Reports, raw POS Sales CSVs, Purchase/Order Excel files, and any unknown spreadsheet.
           </p>
           <input
             type="file"
-            accept=".xlsx,.xlsm"
+            accept=".xlsx,.xlsm,.xls,.csv"
             multiple
             onChange={onFileChange}
             className="hidden"
@@ -408,59 +420,132 @@ export const CategoryUploadPage: React.FC = () => {
             </div>
 
             {/* Outlet & Item Selectors */}
-            <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
-                  <Store className="w-4 h-4 text-blue-600" />
-                  Outlet:
-                </label>
-                <select
-                  value={selectedOutlet}
-                  onChange={(e) => {
-                    const nextOutlet = e.target.value;
-                    setSelectedOutlet(nextOutlet);
-                    if (nextOutlet !== '__ALL__' && selectedItem === '__SUMMARY__') {
-                      setSelectedItem('__ALL_ITEMS__');
-                    } else if (nextOutlet === '__ALL__' && selectedItem === '__ALL_ITEMS__') {
-                      setSelectedItem('__SUMMARY__');
-                    }
-                    setItemSearch('');
-                  }}
-                  className="w-full sm:w-72 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="__ALL__">All Outlets ({data.outlets.length})</option>
-                  {data.outlets.map((o) => (
-                    <option key={o.outlet} value={o.outlet}>
-                      {o.outlet}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {data.outlets.length > 0 && (
+              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
+                    <Store className="w-4 h-4 text-blue-600" />
+                    Outlet:
+                  </label>
+                  <select
+                    value={selectedOutlet}
+                    onChange={(e) => {
+                      const nextOutlet = e.target.value;
+                      setSelectedOutlet(nextOutlet);
+                      if (nextOutlet !== '__ALL__' && selectedItem === '__SUMMARY__') {
+                        setSelectedItem('__ALL_ITEMS__');
+                      } else if (nextOutlet === '__ALL__' && selectedItem === '__ALL_ITEMS__') {
+                        setSelectedItem('__SUMMARY__');
+                      }
+                      setItemSearch('');
+                    }}
+                    className="w-full sm:w-72 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="__ALL__">All Outlets ({data.outlets.length})</option>
+                    {data.outlets.map((o) => (
+                      <option key={o.outlet} value={o.outlet}>
+                        {o.outlet}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
-                  <Layers className="w-4 h-4 text-indigo-600" />
-                  Item:
-                </label>
-                <select
-                  value={selectedItem}
-                  onChange={(e) => setSelectedItem(e.target.value)}
-                  className="w-full sm:w-64 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {selectedOutlet === '__ALL__' ? (
-                    <option value="__SUMMARY__">Outlet Summary (1 row per Outlet)</option>
-                  ) : (
-                    <option value="__ALL_ITEMS__">All Items ({uniqueItemNames.length})</option>
-                  )}
-                  {uniqueItemNames.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
+                    <Layers className="w-4 h-4 text-indigo-600" />
+                    Item:
+                  </label>
+                  <select
+                    value={selectedItem}
+                    onChange={(e) => setSelectedItem(e.target.value)}
+                    className="w-full sm:w-64 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {selectedOutlet === '__ALL__' ? (
+                      <option value="__SUMMARY__">Outlet Summary (1 row per Outlet)</option>
+                    ) : (
+                      <option value="__ALL_ITEMS__">All Items ({uniqueItemNames.length})</option>
+                    )}
+                    {uniqueItemNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
+            )}
           </div>
+
+          {/* Generic Table Fallback for any unknown spreadsheet */}
+          {data.outlets.length === 0 && data.raw_sheets && data.raw_sheets.length > 0 && (() => {
+            const activeSheet = data.raw_sheets[activeRawSheetIdx] || data.raw_sheets[0];
+            const q = itemSearch.trim().toLowerCase();
+            const visibleRows = q
+              ? activeSheet.rows.filter((r) => r.some((cell) => cell.toLowerCase().includes(q)))
+              : activeSheet.rows;
+
+            return (
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {data.raw_sheets.map((sh, idx) => (
+                      <button
+                        key={`${sh.sheet_name}-${idx}`}
+                        type="button"
+                        onClick={() => setActiveRawSheetIdx(idx)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                          idx === activeRawSheetIdx
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {sh.sheet_name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-3 flex-1 max-w-md">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={itemSearch}
+                        onChange={(e) => setItemSearch(e.target.value)}
+                        placeholder="Search any column in this sheet..."
+                        className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">
+                      {visibleRows.length} rows
+                    </span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                        {activeSheet.headers.map((h, i) => (
+                          <th key={i} className="py-3 px-4 whitespace-nowrap border-r border-slate-100">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-sm">
+                      {visibleRows.map((r, rIdx) => (
+                        <tr key={rIdx} className="hover:bg-slate-50/80">
+                          {r.map((cell, cIdx) => (
+                            <td key={cIdx} className="py-2.5 px-4 text-slate-700 whitespace-nowrap border-r border-slate-50">
+                              {cell || '0'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* All Outlets Table (Detailed with Item Name, or Combined Summary) */}
           {selectedOutlet === '__ALL__' && (
