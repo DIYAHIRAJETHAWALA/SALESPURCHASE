@@ -67,8 +67,12 @@ export const CategoryUploadPage: React.FC = () => {
         uploaded.push(json);
       }
 
-      setDatasets(uploaded);
-      setActiveCategoryIdx(0);
+      setDatasets((prev) => {
+        const existing = new Map(prev.map((d) => [d.filename, d]));
+        for (const u of uploaded) existing.set(u.filename, u);
+        return [...existing.values()];
+      });
+      setActiveCategoryIdx(datasets.length > 0 ? datasets.length : 0);
       setActiveRawSheetIdx(0);
       setSelectedOutlet(uploaded[0]?.outlets.length > 0 ? '__ALL__' : '');
       setSelectedItem('__SUMMARY__');
