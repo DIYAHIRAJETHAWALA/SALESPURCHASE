@@ -1,59 +1,223 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   FileSpreadsheet, Search, ArrowUpDown, Filter,
-  Store, ShoppingBag, TrendingUp, DollarSign,
-  Download, ChevronRight, Layers, RefreshCw
+  Store, Upload
 } from 'lucide-react';
 import { fetchMasterMergedTable, fetchOutletsList } from '../api';
 import { MasterMergedRow, MasterMergedResponse, Outlet } from '../types';
+import { useUploadedData, UploadResult } from '../context/UploadedDataContext';
+import { fuzzyOutletScore, isTotalRowLabel, normalizeOutletStr } from '../utils/outletFuzzy';
 
 interface MasterMergedPageProps {
   onSelectOutlet: (outletId: number) => void;
 }
 
 export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutlet }) => {
-  const [data, setData] = useState<MasterMergedResponse | null>(null);
-  const [outlets, setOutlets] = useState<Outlet[]>([]);
+  const { datasets, setDatasets } = useUploadedData();
+  const [dbData, setDbData] = useState<MasterMergedResponse | null>(null);
+  const [dbOutlets, setDbOutlets] = useState<Outlet[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
 
   // Filters
-  const [selectedOutletId, setSelectedOutletId] = useState<number | undefined>(undefined);
+  const [selectedOutletName, setSelectedOutletName] = useState<string>('');
   const [itemSearch, setItemSearch] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('outlet_name');
-  const [sortOrder, setSortOrder] = useState<string>('asc');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState<number>(1);
   const pageSize = 50;
 
   useEffect(() => {
-    fetchOutletsList().then(setOutlets).catch(console.error);
+    fetchOutletsList().then(setDbOutlets).catch(() => {});
   }, []);
 
   useEffect(() => {
-    loadMergedData();
-  }, [selectedOutletId, itemSearch, statusFilter, dateFilter, sortBy, sortOrder, page]);
-
-  const loadMergedData = async () => {
-    try {
-      setLoading(true);
-      const res = await fetchMasterMergedTable({
-        outletId: selectedOutletId,
-        itemSearch: itemSearch || undefined,
-        status: statusFilter,
-        dateFilter: dateFilter,
-        sortBy: sortBy,
-        sortOrder: sortOrder,
-        page: page,
-        limit: pageSize,
+    let cancelled = false;
+    setLoading(true);
+    const matchedDbOutlet = dbOutlets.find((o) => o.official_name === selectedOutletName);
+    fetchMasterMergedTable({
+      outletId: matchedDbOutlet?.id,
+      itemSearch: itemSearch || undefined,
+      status: statusFilter,
+      dateFilter: dateFilter,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+      page: page,
+      limit: pageSize,
+    })
+      .then((res) => {
+        if (!cancelled) setDbData(res);
+      })
+      .catch(() => {
+        if (!cancelled) setDbData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-      setData(res);
-    } catch (err) {
-      console.error('Failed to load merged data:', err);
-    } finally {
-      setLoading(false);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOutletName, itemSearch, statusFilter, dateFilter, sortBy, sortOrder, page, dbOutlets]);
+
+  // Build rows from uploaded Excel/CSV files when DB has no rows
+  const excelRows = useMemo<MasterMergedRow[]>(() => {
+    const rows: MasterMergedRow[] = [];
+    let nextId = -1;
+
+    for (const ds of datasets) {
+      if (ds.outlets && ds.outlets.length > 0) {
+        for (const o of ds.outlets) {
+          if (!o.outlet || isTotalRowLabel(o.outlet)) continue;
+          if (o.items && o.items.length > 0) {
+            for (const it of o.items) {
+              const sq = it.sales_qty ?? 0;
+              const pq = it.purchase_units ?? 0;
+              const status: 'both' | 'sold_only' | 'purchased_only' =
+                sq > 0 && pq > 0 ? 'both' : sq > 0 ? 'sold_only' : 'purchased_only';
+              rows.push({
+                outlet_id: nextId--,
+                outlet_name: o.outlet,
+                outlet_code: ds.category || undefined,
+                item_id: nextId--,
+                item_name: it.name,
+                item_code: it.size || undefined,
+                purchase_qty: pq,
+                purchase_amount: 0,
+                sales_qty: sq,
+                sales_amount: 0,
+                diff_qty: sq - pq,
+                diff_amount: 0,
+                status,
+              });
+            }
+          } else {
+            const sq = o.summary?.total_sales_qty ?? 0;
+            const pq = o.summary?.purchase_units ?? 0;
+            const status: 'both' | 'sold_only' | 'purchased_only' =
+              sq > 0 && pq > 0 ? 'both' : sq > 0 ? 'sold_only' : 'purchased_only';
+            rows.push({
+              outlet_id: nextId--,
+              outlet_name: o.outlet,
+              outlet_code: ds.category || undefined,
+              item_id: nextId--,
+              item_name: ds.category || ds.filename,
+              purchase_qty: pq,
+              purchase_amount: 0,
+              sales_qty: sq,
+              sales_amount: 0,
+              diff_qty: sq - pq,
+              diff_amount: 0,
+              status,
+            });
+          }
+        }
+      } else if (ds.raw_sheets && ds.raw_sheets.length > 0) {
+        for (const sheet of ds.raw_sheets) {
+          const headers = sheet.headers || [];
+          const rawRows = sheet.rows || [];
+          if (headers.length === 0 || rawRows.length === 0) continue;
+
+          let outletColIdx = headers.findIndex((h) => {
+            const low = String(h || '').toLowerCase();
+            return low.includes('outlet') || low.includes('location') || low.includes('branch') || low.includes('store');
+          });
+          if (outletColIdx === -1) outletColIdx = 0;
+
+          for (const r of rawRows) {
+            const outletName = String(r[outletColIdx] ?? '').trim();
+            if (!outletName || isTotalRowLabel(outletName) || /^[\d.,\-%]+$/.test(outletName)) continue;
+            headers.forEach((h, cIdx) => {
+              if (cIdx === outletColIdx || !h) return;
+              const num = parseFloat(String(r[cIdx] ?? '').replace(/,/g, ''));
+              if (isNaN(num)) return;
+              rows.push({
+                outlet_id: nextId--,
+                outlet_name: outletName,
+                outlet_code: sheet.sheet_name,
+                item_id: nextId--,
+                item_name: h,
+                purchase_qty: 0,
+                purchase_amount: 0,
+                sales_qty: num,
+                sales_amount: 0,
+                diff_qty: num,
+                diff_amount: 0,
+                status: 'sold_only',
+              });
+            });
+          }
+        }
+      }
     }
-  };
+    return rows;
+  }, [datasets]);
+
+  const useExcelFallback = (!dbData || dbData.total === 0) && excelRows.length > 0;
+
+  // Unique outlets list for dropdown
+  const outletOptions = useMemo<string[]>(() => {
+    const seen = new Map<string, string>();
+    for (const o of dbOutlets) {
+      seen.set(normalizeOutletStr(o.official_name), o.official_name);
+    }
+    for (const r of excelRows) {
+      const k = normalizeOutletStr(r.outlet_name);
+      if (k && !seen.has(k)) seen.set(k, r.outlet_name);
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+  }, [dbOutlets, excelRows]);
+
+  const data = useMemo<MasterMergedResponse | null>(() => {
+    if (!useExcelFallback) return dbData;
+
+    let filtered = excelRows;
+    if (selectedOutletName) {
+      const targetKey = normalizeOutletStr(selectedOutletName);
+      filtered = filtered.filter((r) => normalizeOutletStr(r.outlet_name) === targetKey);
+    }
+    if (itemSearch.trim()) {
+      const q = itemSearch.trim();
+      filtered = filtered.filter(
+        (r) =>
+          fuzzyOutletScore(q, r.item_name) >= 55 ||
+          fuzzyOutletScore(q, r.outlet_name) >= 55
+      );
+    }
+    if (statusFilter === 'both') {
+      filtered = filtered.filter((r) => r.status === 'both');
+    } else if (statusFilter === 'sold_only') {
+      filtered = filtered.filter((r) => r.status === 'sold_only');
+    } else if (statusFilter === 'purchased_only') {
+      filtered = filtered.filter((r) => r.status === 'purchased_only');
+    } else if (statusFilter === 'variance_only') {
+      filtered = filtered.filter((r) => r.diff_qty !== 0);
+    }
+
+    const sorted = [...filtered].sort((a, b) => {
+      const dir = sortOrder === 'asc' ? 1 : -1;
+      if (sortBy === 'outlet_name' || sortBy === 'item_name') {
+        return String(a[sortBy]).localeCompare(String(b[sortBy])) * dir;
+      }
+      return (Number((a as any)[sortBy] ?? 0) - Number((b as any)[sortBy] ?? 0)) * dir;
+    });
+
+    const totalSalesQty = sorted.reduce((acc, r) => acc + r.sales_qty, 0);
+    const totalPurchQty = sorted.reduce((acc, r) => acc + r.purchase_qty, 0);
+    const startIdx = (page - 1) * pageSize;
+    return {
+      total: sorted.length,
+      page,
+      limit: pageSize,
+      total_sales_amount: 0,
+      total_purchase_amount: 0,
+      total_variance_amount: 0,
+      total_sales_qty: totalSalesQty,
+      total_purchase_qty: totalPurchQty,
+      rows: sorted.slice(startIdx, startIdx + pageSize),
+    };
+  }, [useExcelFallback, dbData, excelRows, selectedOutletName, itemSearch, statusFilter, sortBy, sortOrder, page]);
 
   const handleSort = (field: string) => {
     if (sortBy === field) {
@@ -65,9 +229,38 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     setPage(1);
   };
 
+  const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      const uploaded: UploadResult[] = [];
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('period_label', file.name);
+        formData.append('start_date', '');
+        formData.append('end_date', '');
+        const res = await fetch('/api/excel-upload', { method: 'POST', body: formData });
+        if (res.ok) uploaded.push(await res.json());
+      }
+      if (uploaded.length > 0) {
+        setDatasets((prev) => {
+          const map = new Map(prev.map((d) => [d.filename, d]));
+          for (const u of uploaded) map.set(u.filename, u);
+          return [...map.values()];
+        });
+        setPage(1);
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleExportExcel = () => {
     const params = new URLSearchParams();
-    if (selectedOutletId) params.append('outlet_id', selectedOutletId.toString());
+    const matchedDbOutlet = dbOutlets.find((o) => o.official_name === selectedOutletName);
+    if (matchedDbOutlet) params.append('outlet_id', matchedDbOutlet.id.toString());
     if (itemSearch) params.append('item_search', itemSearch);
     if (statusFilter !== 'all') params.append('status', statusFilter);
     if (dateFilter !== 'all') params.append('date_filter', dateFilter);
@@ -79,7 +272,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     return `₹${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const totalPages = data ? Math.ceil(data.total / pageSize) : 1;
+  const totalPages = data ? Math.ceil(data.total / pageSize) || 1 : 1;
 
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto">
@@ -100,13 +293,26 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
           </p>
         </div>
 
-        <button
-          onClick={handleExportExcel}
-          className="self-start lg:self-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center space-x-2 shadow-md transition-all"
-        >
-          <FileSpreadsheet className="w-4 h-4" />
-          <span>Export Unified Master Excel (.xlsx)</span>
-        </button>
+        <div className="flex items-center gap-2 self-start lg:self-center">
+          <label className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center space-x-2 shadow-md transition-all cursor-pointer">
+            <Upload className="w-4 h-4" />
+            <span>{uploading ? 'Uploading...' : 'Upload Excel / CSV'}</span>
+            <input
+              type="file"
+              multiple
+              accept=".xlsx,.xlsm,.xls,.csv"
+              className="hidden"
+              onChange={handleQuickUpload}
+            />
+          </label>
+          <button
+            onClick={handleExportExcel}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center space-x-2 shadow-md transition-all"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Export Unified Master Excel (.xlsx)</span>
+          </button>
+        </div>
       </div>
 
       {/* Aggregate KPI Strip */}
@@ -135,9 +341,9 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
             <p className="text-[11px] text-blue-600 font-medium">Operational variance</p>
           </div>
           <div className="p-3 bg-slate-50 rounded-lg">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Master Outlets</p>
-            <p className="text-lg font-bold text-slate-800 mt-0.5">{outlets.length}</p>
-            <p className="text-[11px] text-slate-400">Registered locations</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Outlets</p>
+            <p className="text-lg font-bold text-slate-800 mt-0.5">{outletOptions.length}</p>
+            <p className="text-[11px] text-slate-400">Available locations</p>
           </div>
         </div>
       )}
@@ -148,28 +354,28 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
           {/* Outlet Dropdown */}
           <div className="w-full sm:w-64">
             <select
-              value={selectedOutletId || ''}
+              value={selectedOutletName}
               onChange={(e) => {
-                setSelectedOutletId(e.target.value ? Number(e.target.value) : undefined);
+                setSelectedOutletName(e.target.value);
                 setPage(1);
               }}
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold bg-slate-50 outline-none focus:bg-white focus:border-blue-500"
             >
-              <option value="">All Master Outlets ({outlets.length})</option>
-              {outlets.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.official_name} {o.code ? `(${o.code})` : ''}
+              <option value="">All Outlets ({outletOptions.length})</option>
+              {outletOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Item Search */}
+          {/* Item / Outlet Fuzzy Search */}
           <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search item name or code..."
+              placeholder="Search item or outlet (e.g. LP S, burger)..."
               value={itemSearch}
               onChange={(e) => { setItemSearch(e.target.value); setPage(1); }}
               className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none focus:bg-white focus:border-blue-500 font-medium"
@@ -298,7 +504,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? (
+              {loading && (!data || data.rows.length === 0) ? (
                 <tr>
                   <td colSpan={9} className="py-14 text-center text-slate-400">
                     <div className="w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
@@ -308,7 +514,9 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
               ) : !data || data.rows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-14 text-center text-slate-400">
-                    No matching sales & purchase records found with current filters.
+                    {excelRows.length === 0
+                      ? 'No records loaded yet. Click "Upload Excel / CSV" above or upload in Excel Upload & Viewer.'
+                      : 'No matching sales & purchase records found with current filters.'}
                   </td>
                 </tr>
               ) : (
@@ -321,7 +529,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
                       {/* Master Outlet */}
                       <td className="py-3 px-4 font-bold text-slate-900">
                         <button
-                          onClick={() => onSelectOutlet(row.outlet_id)}
+                          onClick={() => row.outlet_id > 0 && onSelectOutlet(row.outlet_id)}
                           className="hover:text-blue-600 text-left flex items-center space-x-1.5 group"
                         >
                           <Store className="w-3.5 h-3.5 text-blue-500 group-hover:text-blue-700 flex-shrink-0" />
@@ -329,7 +537,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
                         </button>
                         {row.outlet_code && (
                           <span className="text-[10px] font-mono text-slate-400 ml-5 font-normal">
-                            Code: {row.outlet_code}
+                            {row.outlet_code}
                           </span>
                         )}
                       </td>

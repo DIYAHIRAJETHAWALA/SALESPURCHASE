@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   FileSpreadsheet, Download, RefreshCw, Search,
   Utensils, Coffee, Pizza, Sandwich, Sparkles,
   Layers, Package, Building2, ChevronRight, CheckCircle2,
-  AlertTriangle, ArrowUpDown, FileDown
+  AlertTriangle, ArrowUpDown, FileDown, Upload
 } from 'lucide-react';
+import { useUploadedData, UploadResult } from '../context/UploadedDataContext';
+import { isTotalRowLabel } from '../utils/outletFuzzy';
 
 interface MenuItem {
   name: string;
@@ -133,14 +135,16 @@ interface AvailableItem {
 }
 
 export const CategoryAnalysisPage: React.FC = () => {
-  const [data, setData] = useState<AnalysisData | null>(null);
+  const { datasets, setDatasets } = useUploadedData();
+  const [dbData, setDbData] = useState<AnalysisData | null>(null);
   const [activeTab, setActiveTab] = useState<string>('Single_Item_Analysis');
   const [loading, setLoading] = useState<boolean>(true);
+  const [uploading, setUploading] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   // Single Item Deep Dive State
-  const [availableItems, setAvailableItems] = useState<AvailableItem[]>([]);
+  const [dbAvailableItems, setDbAvailableItems] = useState<AvailableItem[]>([]);
   const [selectedItemName, setSelectedItemName] = useState<string>('coffee 25');
   const [singleItemData, setSingleItemData] = useState<SingleItemAnalysis | null>(null);
   const [loadingSingleItem, setLoadingSingleItem] = useState<boolean>(false);
@@ -152,9 +156,10 @@ export const CategoryAnalysisPage: React.FC = () => {
       const res = await fetch(`/api/analytics/category-analysis${force ? '?force_refresh=true' : ''}`);
       if (!res.ok) throw new Error('Failed to load category analysis');
       const json = await res.json();
-      setData(json);
+      setDbData(json);
     } catch (err: any) {
-      setError(err.message || 'Error loading analysis');
+      // If backend DB is empty or offline, uploaded Excel datasets can still power the view
+      setError(datasets.length === 0 ? (err.message || 'Error loading analysis') : null);
     } finally {
       setLoading(false);
     }
@@ -165,7 +170,7 @@ export const CategoryAnalysisPage: React.FC = () => {
       const res = await fetch('/api/analytics/items-list');
       if (res.ok) {
         const json = await res.json();
-        setAvailableItems(json);
+        setDbAvailableItems(json);
       }
     } catch (e) {
       console.error(e);
@@ -192,6 +197,218 @@ export const CategoryAnalysisPage: React.FC = () => {
     fetchItemsList();
     fetchSingleItem('coffee 25');
   }, []);
+
+  const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const uploaded: UploadResult[] = [];
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('period_label', file.name);
+        formData.append('start_date', '');
+        formData.append('end_date', '');
+        const res = await fetch('/api/excel-upload', { method: 'POST', body: formData });
+        if (res.ok) uploaded.push(await res.json());
+      }
+      if (uploaded.length > 0) {
+        setDatasets((prev) => {
+          const map = new Map(prev.map((d) => [d.filename, d]));
+          for (const u of uploaded) map.set(u.filename, u);
+          return [...map.values()];
+        });
+        setActiveTab('Outlet Summary');
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Build fallback AnalysisData from uploaded Excel/CSV files when backend DB is empty
+  const data = useMemo<AnalysisData | null>(() => {
+    const hasDbContent =
+      dbData &&
+      (Object.keys(dbData.categories || {}).length > 0 ||
+        (dbData.outlet_summary || []).length > 0 ||
+        (dbData.grand_summary || []).length > 0);
+    if (hasDbContent || datasets.length === 0) return dbData;
+
+    const categories: Record<string, CategoryData> = {};
+    const outletMap = new Map<string, OutletSummaryRow>();
+    const grandSummary: GrandSummaryRow[] = [];
+
+    const mapCategoryKey = (raw: string): string => {
+      const low = raw.toLowerCase();
+      if (low.includes('burger')) return 'Burgers';
+      if (low.includes('beverage') || low.includes('coffee') || low.includes('drink')) return 'Beverages';
+      if (low.includes('pizza')) return 'Pizzas';
+      if (low.includes('sandwich')) return 'Sandwiches';
+      if (low.includes('garlic')) return 'Garlic Bread';
+      if (low.includes('fries')) return 'French Fries';
+      return raw || 'Uploaded Report';
+    };
+
+    for (const ds of datasets) {
+      const catKey = mapCategoryKey(ds.category || ds.filename);
+      if (!categories[catKey]) {
+        categories[catKey] = { raw_material: ds.filename, items: [], outlets: [] };
+      }
+      const itemAgg = new Map<string, MenuItem>();
+
+      if (ds.outlets && ds.outlets.length > 0) {
+        for (const o of ds.outlets) {
+          if (!o.outlet || isTotalRowLabel(o.outlet)) continue;
+          const indiv = o.summary?.individual_sales ?? 0;
+          const combo = o.summary?.combo_sales ?? 0;
+          const totSales = o.summary?.total_sales_qty ?? 0;
+          const packs = o.summary?.purchase_packs ?? 0;
+          const units = o.summary?.purchase_units ?? 0;
+
+          categories[catKey].outlets.push({
+            outlet: o.outlet,
+            individual_sales_qty: indiv,
+            combo_sales_qty: combo,
+            total_sales_qty: totSales,
+            purchase_packs: packs,
+            purchase_units: units,
+            variance: totSales - units,
+            sales_amount: 0,
+          });
+
+          const existingOut = outletMap.get(o.outlet) || {
+            outlet: o.outlet,
+            sales_amount: 0,
+            individual_items_qty: 0,
+            combo_items_qty: 0,
+            total_items_sold: 0,
+            burgers_sold: 0,
+            burger_buns_purchased: 0,
+            pizzas_sold: 0,
+            pizza_bases_purchased: 0,
+            sandwiches_sold: 0,
+            bread_purchased: 0,
+            fries_sold: 0,
+            fries_purchased: 0,
+            garlic_bread_sold: 0,
+            garlic_bread_purchased: 0,
+            beverages_sold: 0,
+          };
+          existingOut.individual_items_qty += indiv;
+          existingOut.combo_items_qty += combo;
+          existingOut.total_items_sold += totSales;
+          if (catKey === 'Burgers') { existingOut.burgers_sold += totSales; existingOut.burger_buns_purchased += units; }
+          if (catKey === 'Pizzas') { existingOut.pizzas_sold += totSales; existingOut.pizza_bases_purchased += units; }
+          if (catKey === 'Sandwiches') { existingOut.sandwiches_sold += totSales; existingOut.bread_purchased += units; }
+          if (catKey === 'French Fries') { existingOut.fries_sold += totSales; existingOut.fries_purchased += units; }
+          if (catKey === 'Garlic Bread') { existingOut.garlic_bread_sold += totSales; existingOut.garlic_bread_purchased += units; }
+          if (catKey === 'Beverages') { existingOut.beverages_sold += totSales; }
+          outletMap.set(o.outlet, existingOut);
+
+          for (const it of o.items || []) {
+            const cur = itemAgg.get(it.name) || {
+              name: it.name,
+              size: it.size,
+              qty: 0,
+              amount: 0,
+              avg_price: 0,
+            };
+            cur.qty += it.sales_qty ?? 0;
+            itemAgg.set(it.name, cur);
+          }
+        }
+      } else if (ds.raw_sheets && ds.raw_sheets.length > 0) {
+        for (const sheet of ds.raw_sheets) {
+          const headers = sheet.headers || [];
+          const rows = sheet.rows || [];
+          if (headers.length === 0 || rows.length === 0) continue;
+          let outletColIdx = headers.findIndex((h) => {
+            const low = String(h || '').toLowerCase();
+            return low.includes('outlet') || low.includes('location') || low.includes('branch') || low.includes('store');
+          });
+          if (outletColIdx === -1) outletColIdx = 0;
+
+          for (const r of rows) {
+            const outletName = String(r[outletColIdx] ?? '').trim();
+            if (!outletName || isTotalRowLabel(outletName) || /^[\d.,\-%]+$/.test(outletName)) continue;
+            let rowSum = 0;
+            headers.forEach((h, cIdx) => {
+              if (cIdx === outletColIdx || !h) return;
+              const num = parseFloat(String(r[cIdx] ?? '').replace(/,/g, ''));
+              if (isNaN(num)) return;
+              rowSum += num;
+              const cur = itemAgg.get(h) || { name: h, qty: 0, amount: 0, avg_price: 0 };
+              cur.qty += num;
+              itemAgg.set(h, cur);
+            });
+            categories[catKey].outlets.push({
+              outlet: outletName,
+              individual_sales_qty: rowSum,
+              combo_sales_qty: 0,
+              total_sales_qty: rowSum,
+              purchase_packs: 0,
+              purchase_units: 0,
+              variance: rowSum,
+              sales_amount: 0,
+            });
+            const existingOut = outletMap.get(outletName) || {
+              outlet: outletName,
+              sales_amount: 0,
+              individual_items_qty: 0,
+              combo_items_qty: 0,
+              total_items_sold: 0,
+              burgers_sold: 0,
+              burger_buns_purchased: 0,
+              pizzas_sold: 0,
+              pizza_bases_purchased: 0,
+              sandwiches_sold: 0,
+              bread_purchased: 0,
+              fries_sold: 0,
+              fries_purchased: 0,
+              garlic_bread_sold: 0,
+              garlic_bread_purchased: 0,
+              beverages_sold: 0,
+            };
+            existingOut.individual_items_qty += rowSum;
+            existingOut.total_items_sold += rowSum;
+            outletMap.set(outletName, existingOut);
+          }
+        }
+      }
+
+      categories[catKey].items = Array.from(itemAgg.values());
+      for (const it of categories[catKey].items) {
+        grandSummary.push({
+          category: catKey,
+          name: it.name,
+          type: 'Uploaded',
+          qty: it.qty,
+          amount: it.amount,
+          avg_price: it.avg_price,
+        });
+      }
+    }
+
+    return {
+      categories,
+      combos: [],
+      recipes: [],
+      outlet_summary: Array.from(outletMap.values()),
+      grand_summary: grandSummary,
+    };
+  }, [dbData, datasets]);
+
+  const availableItems = useMemo<AvailableItem[]>(() => {
+    if (dbAvailableItems.length > 0) return dbAvailableItems;
+    if (!data) return [];
+    return data.grand_summary.map((g) => ({
+      name: g.name,
+      category: g.category,
+      total_sold: g.qty,
+    }));
+  }, [dbAvailableItems, data]);
 
   const downloadWorkbook = () => {
     window.open('/api/exports/category-analysis-excel', '_blank');
@@ -248,7 +465,18 @@ export const CategoryAnalysisPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs md:text-sm shadow-lg flex items-center space-x-2 transition cursor-pointer">
+            <Upload className="w-4 h-4" />
+            <span>{uploading ? 'Uploading...' : 'Upload Excel / CSV'}</span>
+            <input
+              type="file"
+              multiple
+              accept=".xlsx,.xlsm,.xls,.csv"
+              className="hidden"
+              onChange={handleQuickUpload}
+            />
+          </label>
           <button
             onClick={() => fetchAnalysis(true)}
             title="Refresh Data"
