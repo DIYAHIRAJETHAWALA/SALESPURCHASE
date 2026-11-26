@@ -1,0 +1,35 @@
+Category,Item_Name,Variant_Size,Cheese_Type,Bread_Base_Cost,Tikki_Cost,Oil_Cost,Veg_Onion_Tomato_Cost,Mayo_Sauce_Cost,Dish_Glass_Wafers_Cost,Ketchup_Cost,Cheese_Cost,Mozzarella_Cost,Special_Seasoning_Cost,Making_Cost,Sale_Price,Profit,RM_Pct,Margin_Pct
+Beverages,COLD COFFEE 25,Small (250ml),No Cheese,0,0,0,0,0,1.5,0,0,0,"Coffee: 15.00, Pouch: 45.00, Straw: 0.30",16.8,25,8.2,67.2%,32.8%
+Beverages,COLD COFFEE 30,Medium (300ml),No Cheese,0,0,0,0,0,5.0,0,0,0,"Coffee: 15.00, Pouch: 45.00, Straw: 0.30",20.3,30,9.7,67.67%,32.33%
+Beverages,COLD COFFEE 35,Large (350ml),No Cheese,0,0,0,0,0,5.0,0,0,0,"Coffee: 20.45, Pouch: 45.00, Straw: 0.30",25.75,35,9.25,73.58%,26.42%
+Beverages,CHOCOLATE 29,Regular (250ml),No Cheese,0,0,0,0,0,1.5,0,0,0,"Chocolate: 15.00, Pouch: 45.00, Straw: 0.30",16.8,29,12.2,57.93%,42.07%
+Beverages,CHOCOLATE 45,Bigger (350ml),No Cheese,0,0,0,0,0,5.0,0,0,0,"Chocolate: 20.45, Pouch: 45.00, Straw: 0.30",25.75,45,19.25,57.23%,42.77%
+Burgers,SIMPLY VEG 30,Standard 30,Without Cheese,6,6,2,1,1.5,0.8,1,0,0,"None",18.3,30,11.7,61.0%,39.0%
+Burgers,TANGY 30,Standard 30,Without Cheese,6,6,2,1,2.0,0.8,1,0,0,"None",18.8,30,11.2,62.67%,37.33%
+Burgers,CHATPATA 30,Standard 30,Without Cheese,6,6,2,1,2.0,0.8,1,0,0,"None",18.8,30,11.2,62.67%,37.33%
+Burgers,TANDOORI 40,Premium 40,Without Cheese,6,6,2,1,2.4,4.2,1,0,0,"Dish & Wafers: 4.2",22.6,40,17.4,56.5%,43.5%
+Burgers,PERI PERI 40,Premium 40,Without Cheese,6,6,2,1,2.4,4.2,1,0,0,"Dish & Wafers: 4.2",22.6,40,17.4,56.5%,43.5%
+Burgers,SCHEZWAN 50,Deluxe 50,Without Cheese,6,6,2,1,1.5,4.2,1,0,0,"Schezwan Chutney: 8.00",29.7,50,20.3,59.4%,40.6%
+Burgers,GREEN TWISTER 50,Deluxe 50,Without Cheese,6,6,2,1,1.5,4.2,1,0,0,"Green Chutney: 3.00",24.7,50,25.3,49.4%,50.6%
+Burgers,TANGY CHEEZY 40,Cheesy 40,With Cheese,6,6,1,0.5,2.0,1.5,0.6,2.0,0,"Cheese Slice / Dip",19.6,40,20.4,49.0%,51.0%
+Burgers,CHATPATA CHEEZY 40,Cheesy 40,With Cheese,6,6,2,1,2.0,4.2,1,2.69,0,"Cheese Blend",24.89,40,15.11,62.22%,37.78%
+Burgers,TANDOORI CHEEZY 50,Cheesy 50,With Cheese,6,6,2,1,2.4,4.2,1,2.69,0,"Cheese Blend",25.29,50,24.71,50.58%,49.42%
+Burgers,PERI CHEEZY 50,Cheesy 50,With Cheese,6,6,2,1,2.4,4.2,1,2.69,0,"Cheese Blend",25.29,50,24.71,50.58%,49.42%
+Burgers,SCHEZWAN CHEEZY 60,Cheesy 60,With Cheese,6,6,2,1,9.5,4.2,1,2.69,0,"Mayo & Schezwan: 9.50",32.39,60,27.61,53.98%,46.02%
+Burgers,GREEN CHEEZY 60,Cheesy 60,With Cheese,6,6,2,1,4.5,4.2,1,2.69,0,"Mayo & Green Chutney: 4.50",27.39,60,32.61,45.65%,54.35%
+Pizzas,VEG PIZZA 50,Standard 50,With Mozzarella,7,0,0,2,1.7,1.8,1,2.69,11.76,"Puree: 1.70",27.95,50,22.05,55.9%,44.1%
+Pizzas,MARGHERITA PIZZA 50,Standard 50,With Mozzarella,7,0,0,0,1.7,1.8,1,2.69,11.76,"Puree: 1.70",25.95,50,24.05,51.9%,48.1%
+Pizzas,SCHEZWAN PIZZA 80,Deluxe 80,With Mozzarella,7,0,0,2,10.0,1.8,1,2.69,11.76,"Schezwan Sauce: 10.00",36.25,80,43.75,45.31%,54.69%
+Pizzas,GREEN PIZZA 80,Deluxe 80,With Mozzarella,7,0,0,2,3.75,1.8,1,2.69,11.76,"Green Chutney: 3.75",30.0,80,50.0,37.5%,62.5%
+Pizzas,TANDOORI PIZZA 100,Premium 100,With Mozzarella + Paneer,7,0,0,0,2.4,1.8,1,2.69,12.6,"Paneer: 9.20",36.69,100,63.31,36.69%,63.31%
+Pizzas,CORN PIZZA 100,Premium 100,With Mozzarella + Corn,7,0,0,0,0,1.8,1,4.48,12.6,"Sweet Corn: 1.80",31.08,100,68.92,31.08%,68.92%
+French Fries,FRIES 45,Standard 45,No Cheese,0,0,4,0,0,0.8,1,0,0,"Fries: 15.60",21.4,45,23.6,47.56%,52.44%
+French Fries,PERI FRIES 55,Seasoned 55,No Cheese,0,0,4,0,0,1.8,1,0,0,"Fries: 15.60, Masala: 2.56",24.96,55,30.04,45.38%,54.62%
+French Fries,FRIES 2 DIP 70,With Dips 70,Dips Included,0,0,4,0,0,1.8,1,0,0,"Fries: 13.00, Dip: 2.20",22.0,70,48.0,31.43%,68.57%
+Sandwiches,CHEESE MAYO SANDWICH 65,Cheesy 65,With Cheese,12,0,0,0,3.25,1.8,1,17.0,0,"Butter: 10.08, Chutney: 4.50, Wafers: 4.40",54.03,65,10.97,83.12%,16.88%
+Sandwiches,MAYO SANDWICH 45,Standard 45,Without Cheese,12,0,0,0,3.25,1.8,1,0,0,"Butter: 10.08, Chutney: 4.50, Wafers: 4.40",37.03,45,7.97,82.29%,17.71%
+Sandwiches,FLAVOURED MAYO SANDWICH 75,Premium 75,Without Cheese,12,0,0,0,7.2,1.8,1,0,0,"Butter: 10.08, Flavoured Mayo: 7.20, Wafers: 4.40",39.73,75,35.27,52.97%,47.03%
+Sandwiches,BREAD BUTTER SANDWICH 30,Simple 30,Without Cheese,12,0,0,0,0,1.8,1,0,0,"Butter: 10.08",24.88,30,5.12,82.93%,17.07%
+Sandwiches,BREAD BUTTER CHUTNEY 35,Simple 35,Without Cheese,12,0,0,0,0,1.8,1,0,0,"Butter: 10.08, Chutney: 4.50",29.38,35,5.62,83.94%,16.06%
+Garlic Bread,PLAIN GARLIC BREAD,Standard 36,Without Cheese,0,0,0,0,0,0,0,0,0,"Garlic Bread: 36.25",36.25,59,22.75,61.44%,38.56%
+Garlic Bread,VEG CHEESE GARLIC BREAD,Cheesy 36,With Cheese,0,0,0,0,0,0,0,0,0,"Garlic Bread + Cheese: 36.60",36.6,78,41.4,46.92%,53.08%

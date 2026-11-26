@@ -1,0 +1,847 @@
+import React, { useMemo, useState } from 'react';
+import {
+  UploadCloud,
+  Store,
+  Search,
+  FileSpreadsheet,
+  Package,
+  TrendingUp,
+  Percent,
+  Layers,
+  AlertCircle,
+  CheckCircle2,
+  Calendar,
+  X,
+} from 'lucide-react';
+
+interface ItemRow {
+  name: string;
+  size: string;
+  menu_ref: string;
+  individual_sales: number;
+  combo_sales: number;
+  sales_qty: number;
+  purchase_packs: number;
+  purchase_units: number;
+  rmd_pct: number;
+  size_breakdown: Record<string, number>;
+}
+
+interface OutletSummary {
+  individual_sales: number;
+  combo_sales: number;
+  total_sales_qty: number;
+  purchase_packs: number;
+  purchase_units: number;
+  rmd_pct: number;
+  size_breakdown: Record<string, number>;
+}
+
+interface OutletData {
+  outlet: string;
+  summary: OutletSummary;
+  items: ItemRow[];
+}
+
+interface UploadResult {
+  category: string;
+  filename: string;
+  period_label: string;
+  start_date: string;
+  end_date: string;
+  week_label: string;
+  month_label: string;
+  size_headers: string[];
+  outlets: OutletData[];
+}
+
+export const CategoryUploadPage: React.FC = () => {
+  const [datasets, setDatasets] = useState<UploadResult[]>([]);
+  const [activeCategoryIdx, setActiveCategoryIdx] = useState<number>(0);
+  const [selectedOutlet, setSelectedOutlet] = useState<string>('');
+  const [selectedItem, setSelectedItem] = useState<string>('__SUMMARY__');
+  // Date / period controls
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [periodLabel, setPeriodLabel] = useState<string>('');
+  const [showDateInput, setShowDateInput] = useState<boolean>(false);
+  const [itemSearch, setItemSearch] = useState<string>('');
+  const [hideZeroSales, setHideZeroSales] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const data = datasets[activeCategoryIdx] || null;
+
+  const handleFilesUpload = async (files: FileList | File[], sdOverride?: string, edOverride?: string, labelOverride?: string) => {
+    const fileArr = Array.from(files);
+    if (fileArr.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const uploaded: UploadResult[] = [];
+      for (const file of fileArr) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('period_label', labelOverride || periodLabel || file.name);
+        formData.append('start_date', sdOverride || startDate || '');
+        formData.append('end_date', edOverride || endDate || '');
+
+        const res = await fetch('/api/excel-upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.detail || `Upload failed for ${file.name} (${res.status})`);
+        }
+
+        const json: UploadResult = await res.json();
+        uploaded.push(json);
+      }
+
+      setDatasets(uploaded);
+      setActiveCategoryIdx(0);
+      setSelectedOutlet(uploaded[0]?.outlets.length > 0 ? '__ALL__' : '');
+      setSelectedItem('__SUMMARY__');
+      setItemSearch('');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to parse Excel file.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesUpload(e.target.files);
+    }
+  };
+
+  const handleCategorySwitch = (idx: number) => {
+    setActiveCategoryIdx(idx);
+    const nextData = datasets[idx];
+    if (selectedOutlet !== '__ALL__' && nextData && !nextData.outlets.some((o) => o.outlet === selectedOutlet)) {
+      setSelectedOutlet('__ALL__');
+    }
+    setSelectedItem('__SUMMARY__');
+  };
+
+  const uniqueItemNames = useMemo(() => {
+    if (!data) return [];
+    const seen = new Set<string>();
+    const names: string[] = [];
+    for (const o of data.outlets) {
+      for (const it of o.items) {
+        if (!seen.has(it.name)) {
+          seen.add(it.name);
+          names.push(it.name);
+        }
+      }
+    }
+    return names;
+  }, [data]);
+
+  const activeOutletData = useMemo(() => {
+    if (!data || !selectedOutlet || selectedOutlet === '__ALL__') return null;
+    return data.outlets.find((o) => o.outlet === selectedOutlet) || null;
+  }, [data, selectedOutlet]);
+
+  const filteredOutlets = useMemo(() => {
+    if (!data) return [];
+    const q = itemSearch.trim().toLowerCase();
+    return data.outlets.filter((o) => {
+      if (!q) return true;
+      return (
+        o.outlet.toLowerCase().includes(q) ||
+        o.items.some((it) => it.sales_qty > 0 && it.name.toLowerCase().includes(q))
+      );
+    });
+  }, [data, itemSearch]);
+
+  const filteredAllOutletItems = useMemo(() => {
+    if (!data || selectedOutlet !== '__ALL__' || selectedItem === '__SUMMARY__') return [];
+    const q = itemSearch.trim().toLowerCase();
+    const rows: Array<{ outlet: string; item: ItemRow }> = [];
+    for (const o of data.outlets) {
+      for (const it of o.items) {
+        if (selectedItem !== '__ALL_ITEMS__' && it.name !== selectedItem) continue;
+        if (hideZeroSales && it.sales_qty === 0) continue;
+        if (
+          q &&
+          !o.outlet.toLowerCase().includes(q) &&
+          !it.name.toLowerCase().includes(q) &&
+          !it.size.toLowerCase().includes(q) &&
+          !it.menu_ref.toLowerCase().includes(q)
+        ) {
+          continue;
+        }
+        rows.push({ outlet: o.outlet, item: it });
+      }
+    }
+    return rows;
+  }, [data, selectedOutlet, selectedItem, itemSearch, hideZeroSales]);
+
+  const filteredItems = useMemo(() => {
+    if (!activeOutletData) return [];
+    const q = itemSearch.trim().toLowerCase();
+    return activeOutletData.items.filter((item) => {
+      if (selectedItem !== '__ALL_ITEMS__' && selectedItem !== '__SUMMARY__' && item.name !== selectedItem) {
+        return false;
+      }
+      if (hideZeroSales && item.sales_qty === 0) return false;
+      if (!q) return true;
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.size.toLowerCase().includes(q) ||
+        item.menu_ref.toLowerCase().includes(q)
+      );
+    });
+  }, [activeOutletData, selectedItem, itemSearch, hideZeroSales]);
+
+  const formatNum = (n: number) =>
+    Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+  return (
+    <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2.5">
+            <FileSpreadsheet className="w-7 h-7 text-blue-600" />
+            <span>Category Excel Outlet Viewer</span>
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Upload any category Excel report (e.g. <span className="font-medium text-slate-700">Burgers_Outlet_Report.xlsx</span>), pick an outlet, and inspect all items, combos, sales, purchase quantities, and RMD %.
+          </p>
+        </div>
+
+        {/* Upload Button */}
+        <div className="flex flex-col sm:flex-row items-center gap-2">
+          {/* Date range toggle */}
+          <button
+            type="button"
+            onClick={() => setShowDateInput((v) => !v)}
+            className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${
+              showDateInput
+                ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            {startDate ? `${startDate}${endDate ? ' → ' + endDate : ''}` : 'Set Date / Week / Month'}
+            {startDate && (
+              <X
+                className="w-3.5 h-3.5 text-slate-400 hover:text-red-500"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setStartDate('');
+                  setEndDate('');
+                  setPeriodLabel('');
+                }}
+              />
+            )}
+          </button>
+
+          <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-sm cursor-pointer transition-colors">
+            <UploadCloud className="w-4 h-4" />
+            <span>{loading ? 'Processing...' : data ? 'Upload Another Excel' : 'Upload Category Excel'}</span>
+            <input
+              type="file"
+              accept=".xlsx,.xlsm"
+              multiple
+              onChange={onFileChange}
+              disabled={loading}
+              className="hidden"
+            />
+          </label>
+
+          {data && (
+            <button
+              type="button"
+              onClick={() => {
+                setDatasets([]);
+                setSelectedOutlet('');
+                setSelectedItem('__SUMMARY__');
+                setItemSearch('');
+                setError(null);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm transition-colors"
+            >
+              <X className="w-4 h-4" />
+              <span>Clear</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Date / Period Input Panel */}
+      {showDateInput && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex items-center gap-2 flex-1">
+            <Calendar className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-600 whitespace-nowrap">
+              Period Label (optional):
+            </span>
+            <input
+              type="text"
+              value={periodLabel}
+              onChange={(e) => setPeriodLabel(e.target.value)}
+              placeholder="e.g. Week 45, Nov 2026..."
+              className="flex-1 px-3 py-1.5 text-sm border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase text-indigo-600 whitespace-nowrap">From:</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+            />
+            <span className="text-xs font-bold uppercase text-indigo-600 whitespace-nowrap">To:</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+            />
+          </div>
+          <p className="text-xs text-indigo-500">
+            Upload your Excel file after setting these — the period will be tagged to it.
+          </p>
+        </div>
+      )}
+
+      {/* Error Alert */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2.5 text-sm">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Empty State Dropzone */}
+      {!data && !loading && (
+        <label className="block border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white rounded-2xl p-12 text-center cursor-pointer transition-colors">
+          <UploadCloud className="w-12 h-12 text-blue-500 mx-auto mb-3" />
+          <p className="text-base font-semibold text-slate-800">
+            Click to upload a Category Excel file (.xlsx)
+          </p>
+          <p className="text-sm text-slate-500 mt-1">
+            All outlets, items, combos, purchase quantities, and RMD % are parsed instantly without downloading anything.
+          </p>
+          <input
+            type="file"
+            accept=".xlsx,.xlsm"
+            multiple
+            onChange={onFileChange}
+            className="hidden"
+          />
+        </label>
+      )}
+
+      {/* Loaded Content */}
+      {data && (
+        <>
+          {/* Category Switcher Tabs when multiple Excel files are uploaded */}
+          {datasets.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {datasets.map((ds, idx) => (
+                <button
+                  key={`${ds.filename}-${idx}`}
+                  onClick={() => handleCategorySwitch(idx)}
+                  className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                    idx === activeCategoryIdx
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {ds.category}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* File Info + Outlet Selector Bar */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Loaded Category Workbook
+                </div>
+                <div className="text-base font-bold text-slate-900">
+                  {data.category}{' '}
+                  <span className="text-xs font-normal text-slate-500">
+                    ({data.filename} • {data.outlets.length} outlets)
+                  </span>
+                  {(data.start_date || data.week_label || data.month_label || (data.period_label && data.period_label !== data.filename)) && (
+                    <div className="text-xs font-normal text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
+                      {data.period_label && data.period_label !== data.filename && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold">
+                          {data.period_label}
+                        </span>
+                      )}
+                      {data.start_date && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-semibold">
+                          <Calendar className="w-3 h-3" />
+                          {data.start_date}{data.end_date ? ` → ${data.end_date}` : ''}
+                        </span>
+                      )}
+                      {data.week_label && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold">
+                          {data.week_label}
+                        </span>
+                      )}
+                      {data.month_label && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-semibold">
+                          {data.month_label}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Outlet & Item Selectors */}
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
+                  <Store className="w-4 h-4 text-blue-600" />
+                  Outlet:
+                </label>
+                <select
+                  value={selectedOutlet}
+                  onChange={(e) => {
+                    const nextOutlet = e.target.value;
+                    setSelectedOutlet(nextOutlet);
+                    if (nextOutlet !== '__ALL__' && selectedItem === '__SUMMARY__') {
+                      setSelectedItem('__ALL_ITEMS__');
+                    }
+                    setItemSearch('');
+                  }}
+                  className="w-full sm:w-72 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="__ALL__">All Outlets ({data.outlets.length})</option>
+                  {data.outlets.map((o) => (
+                    <option key={o.outlet} value={o.outlet}>
+                      {o.outlet}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
+                  <Layers className="w-4 h-4 text-indigo-600" />
+                  Item:
+                </label>
+                <select
+                  value={selectedItem}
+                  onChange={(e) => setSelectedItem(e.target.value)}
+                  className="w-full sm:w-64 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {selectedOutlet === '__ALL__' && (
+                    <option value="__SUMMARY__">Outlet Summary (1 row per Outlet)</option>
+                  )}
+                  <option value="__ALL_ITEMS__">All Items ({uniqueItemNames.length} items/outlet)</option>
+                  {uniqueItemNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* All Outlets Table (Detailed with Item Name, or Combined Summary) */}
+          {selectedOutlet === '__ALL__' && (
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={itemSearch}
+                    onChange={(e) => setItemSearch(e.target.value)}
+                    placeholder="Filter by outlet or item (e.g. coffee, mango, chocolate, Adajan)..."
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="flex items-center gap-4">
+                  {selectedItem !== '__SUMMARY__' && (
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={hideZeroSales}
+                        onChange={(e) => setHideZeroSales(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>Hide 0-sales items</span>
+                    </label>
+                  )}
+                  <span className="text-xs font-semibold text-slate-500">
+                    {selectedItem === '__SUMMARY__'
+                      ? `Showing ${filteredOutlets.length} of ${data.outlets.length} outlets`
+                      : `Showing ${filteredAllOutletItems.length} rows`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                      <th
+                        rowSpan={2}
+                        className="py-3 px-4 align-bottom bg-slate-50 border-r border-slate-200 sticky left-0 z-10 min-w-[230px]"
+                      >
+                        Outlet Name
+                      </th>
+                      {selectedItem === '__SUMMARY__' ? (
+                        <th
+                          colSpan={uniqueItemNames.length}
+                          className="py-2 px-4 text-center bg-slate-100 text-slate-700 border-b border-r border-slate-200"
+                        >
+                          Item Name (Individual Sales Qty)
+                        </th>
+                      ) : (
+                        <>
+                          <th rowSpan={2} className="py-3 px-4 align-bottom bg-slate-50 border-r border-slate-200">
+                            Item Name
+                          </th>
+                          <th rowSpan={2} className="py-3 px-4 align-bottom bg-slate-50 border-r border-slate-200">
+                            Size / Variant
+                          </th>
+                          <th rowSpan={2} className="py-3 px-4 align-bottom bg-slate-50 border-r border-slate-200">
+                            Menu Ref
+                          </th>
+                        </>
+                      )}
+                      <th colSpan={3} className="py-2 px-4 text-center bg-blue-50/70 text-blue-800 border-b border-r border-slate-200">
+                        Sales
+                      </th>
+                      <th colSpan={2} className="py-2 px-4 text-center bg-amber-50/70 text-amber-800 border-b border-r border-slate-200">
+                        Purchase
+                      </th>
+                      <th rowSpan={2} className="py-3 px-4 text-right align-bottom bg-slate-50">
+                        RMD %
+                      </th>
+                    </tr>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                      {selectedItem === '__SUMMARY__' &&
+                        uniqueItemNames.map((itemName) => (
+                          <th
+                            key={itemName}
+                            className="py-2.5 px-3 text-right whitespace-nowrap border-r border-slate-200"
+                          >
+                            {itemName}
+                          </th>
+                        ))}
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap">Individual</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap">Combo</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap border-r border-slate-200">Total Sales Qty</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap">Packs</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap border-r border-slate-200">Units (Total Qty)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-sm">
+                    {selectedItem === '__SUMMARY__'
+                      ? filteredOutlets.map((o) => {
+                          const itemQtyMap = new Map(o.items.map((it) => [it.name, it.individual_sales]));
+                          return (
+                            <tr
+                              key={o.outlet}
+                              onClick={() => {
+                                setSelectedOutlet(o.outlet);
+                                setSelectedItem('__ALL_ITEMS__');
+                                setItemSearch('');
+                              }}
+                              className="hover:bg-blue-50/50 cursor-pointer transition-colors"
+                            >
+                              <td className="py-3 px-4 font-semibold text-blue-700 hover:underline sticky left-0 bg-white border-r border-slate-100 whitespace-nowrap">
+                                {o.outlet}
+                              </td>
+                              {uniqueItemNames.map((itemName) => {
+                                const val = itemQtyMap.get(itemName) ?? 0;
+                                return (
+                                  <td
+                                    key={itemName}
+                                    className={`py-3 px-3 text-right border-r border-slate-100 ${
+                                      val > 0 ? 'font-medium text-slate-800' : 'text-slate-400'
+                                    }`}
+                                  >
+                                    {formatNum(val)}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-3 px-4 text-right font-medium text-slate-700">
+                                {formatNum(o.summary.individual_sales)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-medium text-indigo-700">
+                                {formatNum(o.summary.combo_sales)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-bold text-emerald-700 border-r border-slate-100">
+                                {formatNum(o.summary.total_sales_qty)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-medium text-slate-700">
+                                {formatNum(o.summary.purchase_packs)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-bold text-amber-700 border-r border-slate-100">
+                                {formatNum(o.summary.purchase_units)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-bold text-slate-900">
+                                {o.summary.rmd_pct.toFixed(2)}%
+                              </td>
+                            </tr>
+                          );
+                        })
+                      : filteredAllOutletItems.map(({ outlet, item }, idx) => (
+                          <tr key={`${outlet}-${item.name}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
+                            <td
+                              onClick={() => {
+                                setSelectedOutlet(outlet);
+                                setItemSearch('');
+                              }}
+                              className="py-3 px-4 font-semibold text-blue-700 hover:underline cursor-pointer"
+                            >
+                              {outlet}
+                            </td>
+                            <td className="py-3 px-4 font-semibold text-slate-900">{item.name}</td>
+                            <td className="py-3 px-4 text-slate-600">
+                              {item.size ? (
+                                <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-semibold">
+                                  {item.size}
+                                </span>
+                              ) : (
+                                '-'
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-xs text-slate-500">{item.menu_ref || '-'}</td>
+                            <td className="py-3 px-4 text-right font-medium text-slate-700">
+                              {formatNum(item.individual_sales)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-medium text-indigo-700">
+                              {formatNum(item.combo_sales)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-emerald-700 border-r border-slate-100">
+                              {formatNum(item.sales_qty)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-medium text-slate-700">
+                              {formatNum(item.purchase_packs)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-amber-700 border-r border-slate-100">
+                              {formatNum(item.purchase_units)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-slate-900">
+                              {item.rmd_pct.toFixed(2)}%
+                            </td>
+                          </tr>
+                        ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Outlet Summary KPIs */}
+          {activeOutletData && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase">
+                    <span>Individual Sales</span>
+                    <Layers className="w-4 h-4 text-blue-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900 mt-2">
+                    {formatNum(activeOutletData.summary.individual_sales)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase">
+                    <span>Combo Sales</span>
+                    <Layers className="w-4 h-4 text-indigo-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-indigo-700 mt-2">
+                    {formatNum(activeOutletData.summary.combo_sales)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase">
+                    <span>Total Sales Qty</span>
+                    <TrendingUp className="w-4 h-4 text-emerald-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-emerald-700 mt-2">
+                    {formatNum(activeOutletData.summary.total_sales_qty)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase">
+                    <span>Purchase Packs</span>
+                    <Package className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900 mt-2">
+                    {formatNum(activeOutletData.summary.purchase_packs)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase">
+                    <span>Total Purchase (Units)</span>
+                    <Package className="w-4 h-4 text-orange-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-orange-700 mt-2">
+                    {formatNum(activeOutletData.summary.purchase_units)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-500 uppercase">
+                    <span>RMD %</span>
+                    <Percent className="w-4 h-4 text-rose-500" />
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900 mt-2">
+                    {activeOutletData.summary.rmd_pct.toFixed(2)}%
+                  </div>
+                </div>
+              </div>
+
+              {/* Size Breakdown Chips */}
+              {Object.keys(activeOutletData.summary.size_breakdown).length > 0 && (
+                <div className="bg-white border border-slate-200 rounded-2xl px-5 py-3.5 shadow-sm flex flex-wrap items-center gap-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Size / Variant Sales:
+                  </span>
+                  {Object.entries(activeOutletData.summary.size_breakdown).map(([label, val]) => (
+                    <span
+                      key={label}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-semibold"
+                    >
+                      <span>{label}:</span>
+                      <span className="text-blue-700 font-bold">{formatNum(val)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Search & Filter Controls + Items Table */}
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={itemSearch}
+                      onChange={(e) => setItemSearch(e.target.value)}
+                      placeholder="Filter items (e.g. cheese, veg, jain, tandoori)..."
+                      className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={hideZeroSales}
+                        onChange={(e) => setHideZeroSales(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>Hide 0-sales items</span>
+                    </label>
+                    <span className="text-xs font-semibold text-slate-500">
+                      Showing {filteredItems.length} of {activeOutletData.items.length} items
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                        <th rowSpan={2} className="py-3 px-4 align-bottom bg-slate-50 border-r border-slate-200">
+                          Item Name
+                        </th>
+                        <th rowSpan={2} className="py-3 px-4 align-bottom bg-slate-50 border-r border-slate-200">
+                          Size / Variant
+                        </th>
+                        <th rowSpan={2} className="py-3 px-4 align-bottom bg-slate-50 border-r border-slate-200">
+                          Menu Ref
+                        </th>
+                        <th colSpan={3} className="py-2 px-4 text-center bg-blue-50/70 text-blue-800 border-b border-r border-slate-200">
+                          Sales
+                        </th>
+                        <th colSpan={2} className="py-2 px-4 text-center bg-amber-50/70 text-amber-800 border-b border-r border-slate-200">
+                          Purchase
+                        </th>
+                        <th rowSpan={2} className="py-3 px-4 text-right align-bottom bg-slate-50">
+                          RMD %
+                        </th>
+                      </tr>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                        <th className="py-2.5 px-4 text-right">Individual</th>
+                        <th className="py-2.5 px-4 text-right">Combo</th>
+                        <th className="py-2.5 px-4 text-right border-r border-slate-200">Total Sales Qty</th>
+                        <th className="py-2.5 px-4 text-right">Packs</th>
+                        <th className="py-2.5 px-4 text-right border-r border-slate-200">Units (Total Qty)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-sm">
+                      {filteredItems.map((item, idx) => (
+                        <tr key={`${item.name}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-4 font-semibold text-slate-900">{item.name}</td>
+                          <td className="py-3 px-4 text-slate-600">
+                            {item.size ? (
+                              <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-xs font-semibold">
+                                {item.size}
+                              </span>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-xs text-slate-500">{item.menu_ref || '-'}</td>
+                          <td className="py-3 px-4 text-right font-medium text-slate-700">
+                            {formatNum(item.individual_sales)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-medium text-indigo-700">
+                            {formatNum(item.combo_sales)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-bold text-emerald-700 border-r border-slate-100">
+                            {formatNum(item.sales_qty)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-medium text-slate-700">
+                            {formatNum(item.purchase_packs)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-bold text-amber-700 border-r border-slate-100">
+                            {formatNum(item.purchase_units)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-bold text-slate-900">
+                            {item.rmd_pct.toFixed(2)}%
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredItems.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="py-8 text-center text-slate-500">
+                            No items match your current filter.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
