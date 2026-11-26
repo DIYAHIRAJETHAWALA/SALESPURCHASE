@@ -3,7 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from backend.database import init_db
+from backend.database import init_db, SessionLocal
+from backend.models import Outlet, OutletAlias
 from backend.routers import (
     outlets, imports, search, analytics, exports, settings, combined, excel_upload
 )
@@ -37,6 +38,47 @@ app.include_router(excel_upload.router)
 @app.on_event("startup")
 def on_startup():
     init_db()
+    _seed_default_outlets_if_empty()
+
+
+def _seed_default_outlets_if_empty():
+    import json
+    seed_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default_outlets.json")
+    if not os.path.exists(seed_path):
+        return
+    db = SessionLocal()
+    try:
+        if db.query(Outlet).count() > 0:
+            return
+        with open(seed_path, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        for item in items:
+            outlet = Outlet(
+                official_name=item["official_name"],
+                normalized_name=item["normalized_name"],
+                code=item.get("code"),
+                city=item.get("city"),
+                state=item.get("state"),
+                is_active=True,
+            )
+            db.add(outlet)
+            db.flush()
+            for alias_text in item.get("aliases", []):
+                db.add(
+                    OutletAlias(
+                        outlet_id=outlet.id,
+                        raw_alias=alias_text,
+                        normalized_alias=item["normalized_name"],
+                        source_type="seed",
+                        confidence=1.0,
+                        is_confirmed=True,
+                    )
+                )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 
 # Serve Frontend Production Build if present

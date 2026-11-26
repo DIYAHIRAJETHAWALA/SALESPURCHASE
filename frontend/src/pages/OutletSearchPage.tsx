@@ -314,6 +314,13 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
 
   const totalOutlets = allOutlets.length;
   const fileNames = datasets.map((d) => d.filename);
+  const emptyFiles = datasets
+    .filter(
+      (d) =>
+        (!d.outlets || d.outlets.length === 0) &&
+        (!d.raw_sheets || d.raw_sheets.every((s) => !s.rows || s.rows.length === 0))
+    )
+    .map((d) => d.filename);
 
   const handleSelectRow = (o: OutletRow) => {
     setItemFilter('');
@@ -498,6 +505,15 @@ export const OutletSearchPage: React.FC<OutletSearchPageProps> = ({ onSelectOutl
         <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           {error}
+        </div>
+      )}
+
+      {emptyFiles.length > 0 && (
+        <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+          <span>
+            <strong>{emptyFiles.join(', ')}</strong> has 0 data rows inside (only column headers). Upload a report with outlet rows (e.g. Burgers/Beverages Outlet Report or Sales/Purchase Excel).
+          </span>
         </div>
       )}
 
