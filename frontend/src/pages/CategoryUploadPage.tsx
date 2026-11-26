@@ -421,6 +421,8 @@ export const CategoryUploadPage: React.FC = () => {
                     setSelectedOutlet(nextOutlet);
                     if (nextOutlet !== '__ALL__' && selectedItem === '__SUMMARY__') {
                       setSelectedItem('__ALL_ITEMS__');
+                    } else if (nextOutlet === '__ALL__' && selectedItem === '__ALL_ITEMS__') {
+                      setSelectedItem('__SUMMARY__');
                     }
                     setItemSearch('');
                   }}
@@ -445,10 +447,11 @@ export const CategoryUploadPage: React.FC = () => {
                   onChange={(e) => setSelectedItem(e.target.value)}
                   className="w-full sm:w-64 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {selectedOutlet === '__ALL__' && (
+                  {selectedOutlet === '__ALL__' ? (
                     <option value="__SUMMARY__">Outlet Summary (1 row per Outlet)</option>
+                  ) : (
+                    <option value="__ALL_ITEMS__">All Items ({uniqueItemNames.length})</option>
                   )}
-                  <option value="__ALL_ITEMS__">All Items ({uniqueItemNames.length} items/outlet)</option>
                   {uniqueItemNames.map((name) => (
                     <option key={name} value={name}>
                       {name}
