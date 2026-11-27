@@ -12,6 +12,7 @@ import { DEFAULT_OUTLETS } from '../utils/defaultOutlets';
 import {
   RecipeBomItem,
   DEFAULT_RECIPE_BOM,
+  findMatchingRecipe,
 } from '../utils/recipeBom';
 
 interface MasterMergedPageProps {
@@ -62,7 +63,8 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const matchedDbOutlet = dbOutlets.find((o) => o.official_name === selectedOutletName);
+    const activeOutlet = recipeOutlet || selectedOutletName;
+    const matchedDbOutlet = dbOutlets.find((o) => o.official_name === activeOutlet);
     fetchMasterMergedTable({
       outletId: matchedDbOutlet?.id,
       itemSearch: itemSearch || undefined,
@@ -70,8 +72,8 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
       dateFilter: dateFilter,
       sortBy: sortBy,
       sortOrder: sortOrder,
-      page: page,
-      limit: pageSize,
+      page: 1,
+      limit: 5000,
     })
       .then((res) => {
         if (!cancelled) setDbData(res);
@@ -85,7 +87,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     return () => {
       cancelled = true;
     };
-  }, [selectedOutletName, itemSearch, statusFilter, dateFilter, sortBy, sortOrder, page, dbOutlets]);
+  }, [recipeOutlet, selectedOutletName, itemSearch, statusFilter, dateFilter, sortBy, sortOrder, page, dbOutlets]);
 
   // Build rows from uploaded Excel/CSV files when DB has no rows
   const excelRows = useMemo<MasterMergedRow[]>(() => {
@@ -347,6 +349,71 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     return DEFAULT_OUTLETS.map((o) => o.official_name).sort((a, b) => a.localeCompare(b));
   }, [outletOptions]);
 
+  const outletMetricsMap = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        qtySold: number;
+        making: number;
+        sale: number;
+        profit: number;
+        marginPct: number;
+        hasSales: boolean;
+      }
+    >();
+
+    const sourceRows: MasterMergedRow[] = useExcelFallback
+      ? excelRows.filter((r) =>
+          recipeOutlet
+            ? normalizeOutletStr(r.outlet_name) === normalizeOutletStr(recipeOutlet)
+            : true
+        )
+      : (dbData?.rows || []).filter((r) =>
+          recipeOutlet
+            ? normalizeOutletStr(r.outlet_name) === normalizeOutletStr(recipeOutlet)
+            : true
+        );
+
+    const aggByRecipe = new Map<string, { qty: number; amt: number }>();
+    for (const row of sourceRows) {
+      if ((row.sales_qty || 0) <= 0) continue;
+      const matched = findMatchingRecipe(row.item_name, bomItems);
+      if (!matched) continue;
+      const cur = aggByRecipe.get(matched.name) || { qty: 0, amt: 0 };
+      cur.qty += row.sales_qty || 0;
+      cur.amt += row.sales_amount || 0;
+      aggByRecipe.set(matched.name, cur);
+    }
+
+    for (const item of bomItems) {
+      const agg = aggByRecipe.get(item.name);
+      if (agg && agg.qty > 0) {
+        const making = item.making_cost * agg.qty;
+        const sale = agg.amt > 0 ? agg.amt : item.sale_price * agg.qty;
+        const profit = sale - making;
+        const marginPct = sale > 0 ? (profit / sale) * 100 : item.margin_pct;
+        map.set(item.name, {
+          qtySold: agg.qty,
+          making,
+          sale,
+          profit,
+          marginPct,
+          hasSales: true,
+        });
+      } else {
+        map.set(item.name, {
+          qtySold: 0,
+          making: item.making_cost,
+          sale: item.sale_price,
+          profit: item.profit,
+          marginPct: item.margin_pct,
+          hasSales: false,
+        });
+      }
+    }
+    return map;
+  }, [bomItems, useExcelFallback, excelRows, dbData, recipeOutlet]);
+
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto">
       {/* Top Banner & Header */}
@@ -492,6 +559,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
                 <th className="py-2.5 px-4">Category</th>
                 <th className="py-2.5 px-4">Food / Beverage Item</th>
                 <th className="py-2.5 px-4">Outlet Name</th>
+                <th className="py-2.5 px-4 text-right">Qty Sold</th>
                 <th className="py-2.5 px-4 text-right">Making (₹)</th>
                 <th className="py-2.5 px-4 text-right">Sale (₹)</th>
                 <th className="py-2.5 px-4 text-right">Profit (₹)</th>
@@ -499,35 +567,52 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredRecipes.map((item, idx) => (
-                <tr
-                  key={`${item.category}-${item.name}-${idx}`}
-                  onClick={() => setModalRecipe({ recipe: item })}
-                  className="hover:bg-blue-50/40 transition cursor-pointer"
-                >
-                  <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
-                  <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline">{item.name}</td>
-                  <td className="py-2.5 px-4 text-slate-600 font-medium">
-                    {recipeOutlet ? (
-                      <span className="text-slate-800 font-semibold">{recipeOutlet}</span>
-                    ) : (
-                      <span className="text-slate-500">All Outlets ({allOutlets.length})</span>
-                    )}
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-semibold text-rose-700 tabular-nums">
-                    ₹{item.making_cost.toFixed(2)}
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
-                    ₹{item.sale_price.toFixed(2)}
-                  </td>
-                  <td className="py-2.5 px-4 text-right font-bold text-emerald-700 tabular-nums">
-                    ₹{item.profit.toFixed(2)}
-                  </td>
-                  <td className="py-2.5 px-4 text-center font-extrabold text-blue-700 tabular-nums">
-                    {item.margin_pct.toFixed(1)}%
-                  </td>
-                </tr>
-              ))}
+              {filteredRecipes.map((item, idx) => {
+                const m = outletMetricsMap.get(item.name) || {
+                  qtySold: 0,
+                  making: item.making_cost,
+                  sale: item.sale_price,
+                  profit: item.profit,
+                  marginPct: item.margin_pct,
+                  hasSales: false,
+                };
+                return (
+                  <tr
+                    key={`${item.category}-${item.name}-${idx}`}
+                    onClick={() => setModalRecipe({ recipe: item })}
+                    className="hover:bg-blue-50/40 transition cursor-pointer"
+                  >
+                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
+                    <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline">{item.name}</td>
+                    <td className="py-2.5 px-4 text-slate-600 font-medium">
+                      {recipeOutlet ? (
+                        <span className="text-slate-800 font-semibold">{recipeOutlet}</span>
+                      ) : (
+                        <span className="text-slate-500">All Outlets ({allOutlets.length})</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-4 text-right font-bold text-slate-700 tabular-nums">
+                      {m.hasSales ? (
+                        m.qtySold.toLocaleString()
+                      ) : (
+                        <span className="text-[10px] font-semibold text-slate-400">1 unit (recipe)</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-4 text-right font-semibold text-rose-700 tabular-nums">
+                      ₹{m.making.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
+                      ₹{m.sale.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="py-2.5 px-4 text-right font-bold text-emerald-700 tabular-nums">
+                      ₹{m.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="py-2.5 px-4 text-center font-extrabold text-blue-700 tabular-nums">
+                      {m.marginPct.toFixed(1)}%
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
