@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { loadPersisted, savePersisted } from '../utils/persistStorage';
+import type { RecipeBomItem } from '../utils/recipeBom';
 
 export interface ItemRow {
   name: string;
@@ -49,6 +50,7 @@ export interface UploadResult {
   size_headers: string[];
   outlets: OutletData[];
   raw_sheets?: RawSheet[];
+  recipe_bom?: RecipeBomItem[];
 }
 
 interface UploadedDataContextValue {

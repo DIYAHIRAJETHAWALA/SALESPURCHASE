@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   FileSpreadsheet, Search, ArrowUpDown, Filter,
-  Store, Upload
+  Store, Upload, Utensils
 } from 'lucide-react';
 import { fetchMasterMergedTable, fetchOutletsList } from '../api';
 import { MasterMergedRow, MasterMergedResponse, Outlet } from '../types';
 import { useUploadedData, UploadResult } from '../context/UploadedDataContext';
 import { fuzzyOutletScore, isTotalRowLabel, normalizeOutletStr } from '../utils/outletFuzzy';
+import { RecipeModal } from '../components/RecipeModal';
+import {
+  RecipeBomItem,
+  DEFAULT_RECIPE_BOM,
+  findMatchingRecipe,
+} from '../utils/recipeBom';
 
 interface MasterMergedPageProps {
   onSelectOutlet: (outletId: number) => void;
@@ -29,8 +35,27 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
   const [page, setPage] = useState<number>(1);
   const pageSize = 50;
 
+  // Recipe BOM & Modal State
+  const [dbRecipeBom, setDbRecipeBom] = useState<RecipeBomItem[]>([]);
+  const [dbRecipeBomFile, setDbRecipeBomFile] = useState<string>('');
+  const [recipeCategory, setRecipeCategory] = useState<string>('All');
+  const [recipeSearch, setRecipeSearch] = useState<string>('');
+  const [modalRecipe, setModalRecipe] = useState<{
+    recipe: RecipeBomItem | null;
+    clickedItemName?: string;
+  } | null>(null);
+
   useEffect(() => {
     fetchOutletsList().then(setDbOutlets).catch(() => {});
+    fetch('/api/analytics/recipe-bom')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (json && Array.isArray(json.recipes) && json.recipes.length > 0) {
+          setDbRecipeBom(json.recipes);
+          setDbRecipeBomFile(json.filename || '');
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -67,6 +92,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     let nextId = -1;
 
     for (const ds of datasets) {
+      if (ds.mode === 'recipe_bom') continue;
       if (ds.outlets && ds.outlets.length > 0) {
         for (const o of ds.outlets) {
           if (!o.outlet || isTotalRowLabel(o.outlet)) continue;
@@ -245,6 +271,14 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
         if (res.ok) uploaded.push(await res.json());
       }
       if (uploaded.length > 0) {
+        const bomUpload = [...uploaded].reverse().find((u) => u.mode === 'recipe_bom' && u.recipe_bom?.length);
+        if (bomUpload && bomUpload.recipe_bom) {
+          setDbRecipeBom(bomUpload.recipe_bom);
+          setDbRecipeBomFile(bomUpload.filename);
+          setTimeout(() => {
+            document.getElementById('merged-recipes-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 150);
+        }
         setDatasets((prev) => {
           const map = new Map(prev.map((d) => [d.filename, d]));
           for (const u of uploaded) map.set(u.filename, u);
@@ -273,6 +307,44 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
   };
 
   const totalPages = data ? Math.ceil(data.total / pageSize) || 1 : 1;
+
+  const uploadedBomDataset = useMemo(
+    () => [...datasets].reverse().find((d) => d.mode === 'recipe_bom' && d.recipe_bom && d.recipe_bom.length > 0),
+    [datasets]
+  );
+
+  const bomItems = useMemo<RecipeBomItem[]>(() => {
+    if (uploadedBomDataset?.recipe_bom?.length) return uploadedBomDataset.recipe_bom;
+    if (dbRecipeBom.length > 0) return dbRecipeBom;
+    return DEFAULT_RECIPE_BOM;
+  }, [uploadedBomDataset, dbRecipeBom]);
+
+  const bomSourceFilename = uploadedBomDataset?.filename || dbRecipeBomFile || '';
+
+  const recipeCategories = useMemo(
+    () => ['All', ...Array.from(new Set(bomItems.map((i) => i.category)))],
+    [bomItems]
+  );
+
+  const filteredRecipes = useMemo(() => {
+    return bomItems.filter((item) => {
+      if (recipeCategory !== 'All' && item.category !== recipeCategory) return false;
+      if (recipeSearch.trim()) {
+        const q = recipeSearch.toLowerCase();
+        return (
+          item.name.toLowerCase().includes(q) ||
+          item.category.toLowerCase().includes(q) ||
+          item.ingredients.some((ing) => ing.name.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [bomItems, recipeCategory, recipeSearch]);
+
+  const openRecipeForItem = (itemName: string) => {
+    const matched = findMatchingRecipe(itemName, bomItems);
+    setModalRecipe({ recipe: matched, clickedItemName: itemName });
+  };
 
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto">
@@ -542,16 +614,22 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
                         )}
                       </td>
 
-                      {/* Item Name */}
+                      {/* Item Name — click to view recipe */}
                       <td className="py-3 px-4 text-slate-800 font-medium">
-                        <div className="flex items-center space-x-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openRecipeForItem(row.item_name)}
+                          className="flex items-center space-x-1.5 text-left text-blue-700 hover:text-blue-900 hover:underline font-semibold group"
+                          title="Click to view recipe"
+                        >
+                          <Utensils className="w-3.5 h-3.5 text-amber-500 group-hover:text-amber-600 flex-shrink-0" />
                           <span>{row.item_name}</span>
                           {row.item_code && (
-                            <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-1 rounded">
+                            <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-1 rounded no-underline">
                               {row.item_code}
                             </span>
                           )}
-                        </div>
+                        </button>
                       </td>
 
                       {/* Purchase Qty */}
@@ -644,6 +722,116 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
           </div>
         )}
       </div>
+
+      {/* Food & Beverage Recipes Section (populated from uploaded Excel or saved BOM) */}
+      <div id="merged-recipes-section" className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="p-5 border-b border-slate-100 bg-slate-50/60 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <Utensils className="w-4 h-4 text-blue-600" />
+                <span>Food &amp; Beverage Recipes</span>
+              </h2>
+              {bomSourceFilename && (
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Loaded from {bomSourceFilename} ({bomItems.length} items)
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Upload your recipe Excel once above to see all food &amp; beverage items with their ingredients. Click any item to open its full recipe.
+            </p>
+          </div>
+
+          <div className="relative w-full lg:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search food, beverage, ingredient..."
+              value={recipeSearch}
+              onChange={(e) => setRecipeSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500 bg-white"
+            />
+          </div>
+        </div>
+
+        <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto">
+          {recipeCategories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setRecipeCategory(cat)}
+              className={`px-3 py-1 rounded-full text-[11px] font-bold whitespace-nowrap transition ${
+                recipeCategory === cat
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-x-auto max-h-[520px]">
+          <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200 z-10">
+              <tr>
+                <th className="py-2.5 px-4">Category</th>
+                <th className="py-2.5 px-4">Food / Beverage Item</th>
+                <th className="py-2.5 px-4">Recipe Ingredients</th>
+                <th className="py-2.5 px-4 text-right">Making (₹)</th>
+                <th className="py-2.5 px-4 text-right">Sale (₹)</th>
+                <th className="py-2.5 px-4 text-right">Profit (₹)</th>
+                <th className="py-2.5 px-4 text-center">Margin %</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredRecipes.map((item, idx) => (
+                <tr
+                  key={`${item.category}-${item.name}-${idx}`}
+                  onClick={() => setModalRecipe({ recipe: item })}
+                  className="hover:bg-blue-50/40 transition cursor-pointer"
+                >
+                  <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
+                  <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline">{item.name}</td>
+                  <td className="py-2.5 px-4">
+                    <div className="flex flex-wrap gap-1 max-w-md">
+                      {item.ingredients.map((ing, i) => (
+                        <span
+                          key={i}
+                          className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-medium"
+                        >
+                          {ing.name}: ₹{ing.cost}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-semibold text-rose-700 tabular-nums">
+                    ₹{item.making_cost.toFixed(2)}
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
+                    ₹{item.sale_price.toFixed(2)}
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-bold text-emerald-700 tabular-nums">
+                    ₹{item.profit.toFixed(2)}
+                  </td>
+                  <td className="py-2.5 px-4 text-center font-extrabold text-blue-700 tabular-nums">
+                    {item.margin_pct.toFixed(1)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {modalRecipe && (
+        <RecipeModal
+          recipe={modalRecipe.recipe}
+          clickedItemName={modalRecipe.clickedItemName}
+          onClose={() => setModalRecipe(null)}
+        />
+      )}
     </div>
   );
 };

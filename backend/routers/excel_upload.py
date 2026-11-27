@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import openpyxl
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from backend.parsers.manager import ParserManager
+from backend.parsers.recipe_bom import RecipeBOMParser
 
 router = APIRouter(prefix="/api", tags=["Excel Upload"])
 
@@ -227,6 +228,27 @@ async def upload_excel(
     outlet_order: List[str] = []
     size_headers: List[str] = []
     mode = "category_report"
+
+    # --- Path 0: Recipe Costing / Bill of Materials (BOM) Grid ---
+    if RecipeBOMParser.can_parse_bytes(contents, filename):
+        recipe_bom = RecipeBOMParser.parse_bytes(contents, filename)
+        if recipe_bom:
+            RecipeBOMParser.save_bom(recipe_bom, filename=filename)
+            return {
+                "mode": "recipe_bom",
+                "report_type": "recipe_bom",
+                "category": "Recipe BOM",
+                "filename": filename,
+                "period_label": period_label or filename,
+                "start_date": start_date,
+                "end_date": end_date,
+                "week_label": "",
+                "month_label": "",
+                "size_headers": [],
+                "outlets": [],
+                "raw_sheets": [],
+                "recipe_bom": recipe_bom,
+            }
 
     def ensure_outlet(name: str) -> Dict[str, Any]:
         if name not in outlets_map:

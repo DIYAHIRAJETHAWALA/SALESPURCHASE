@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { UploadedDataProvider } from './context/UploadedDataContext';
-import { CategoryAnalysisPage } from './pages/CategoryAnalysisPage';
 import { CategoryUploadPage } from './pages/CategoryUploadPage';
 import { CombinedUploadPage } from './pages/CombinedUploadPage';
 import { MasterMergedPage } from './pages/MasterMergedPage';
@@ -37,8 +36,6 @@ export function App() {
 
   const renderContent = () => {
     switch (currentPage) {
-      case 'category_analysis':
-        return <CategoryAnalysisPage />;
       case 'category_upload':
         return <CategoryUploadPage />;
       case 'master_merged':
@@ -86,7 +83,7 @@ export function App() {
       case 'settings':
         return <SettingsPage />;
       default:
-        return <CategoryAnalysisPage />;
+        return <CategoryUploadPage />;
     }
   };
 

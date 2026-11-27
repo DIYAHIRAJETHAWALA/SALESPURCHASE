@@ -831,4 +831,14 @@ def get_single_item_analysis(item_name: str = Query(..., description="Exact or p
     return item_service.analyze_item(item_name)
 
 
+@router.get("/recipe-bom")
+def get_recipe_bom():
+    """
+    Returns the uploaded Recipe Bill of Materials (BOM) with full ingredient breakdowns,
+    making costs, sale prices, profits, and margins.
+    """
+    from backend.parsers.recipe_bom import RecipeBOMParser
+    return RecipeBOMParser.load_bom()
+
+
 
