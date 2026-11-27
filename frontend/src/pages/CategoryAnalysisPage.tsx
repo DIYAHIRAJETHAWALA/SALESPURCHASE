@@ -3,10 +3,16 @@ import {
   FileSpreadsheet, Download, RefreshCw, Search,
   Utensils, Coffee, Pizza, Sandwich, Sparkles,
   Layers, Package, Building2, ChevronRight, CheckCircle2,
-  AlertTriangle, ArrowUpDown, FileDown, Upload
+  AlertTriangle, ArrowUpDown, FileDown, Upload, X
 } from 'lucide-react';
 import { useUploadedData, UploadResult } from '../context/UploadedDataContext';
 import { isTotalRowLabel } from '../utils/outletFuzzy';
+import {
+  BUILT_IN_RECIPES,
+  parseRecipesFromDatasets,
+  findRecipeForItem,
+  ItemRecipe,
+} from '../data/builtInRecipes';
 
 interface MenuItem {
   name: string;
@@ -148,6 +154,21 @@ export const CategoryAnalysisPage: React.FC = () => {
   const [selectedItemName, setSelectedItemName] = useState<string>('coffee 25');
   const [singleItemData, setSingleItemData] = useState<SingleItemAnalysis | null>(null);
   const [loadingSingleItem, setLoadingSingleItem] = useState<boolean>(false);
+  const [selectedRecipe, setSelectedRecipe] = useState<ItemRecipe | null>(null);
+  const [recipeCatFilter, setRecipeCatFilter] = useState<string>('All');
+
+  // Merge recipes parsed from uploaded Excel/CSV files with built-in recipes
+  const allRecipes = useMemo<ItemRecipe[]>(() => {
+    const uploadedRecipes = parseRecipesFromDatasets(datasets);
+    const byKey = new Map<string, ItemRecipe>();
+    for (const r of BUILT_IN_RECIPES) {
+      byKey.set(r.name.toLowerCase().replace(/[^a-z0-9]/g, ''), r);
+    }
+    for (const r of uploadedRecipes) {
+      byKey.set(r.name.toLowerCase().replace(/[^a-z0-9]/g, ''), r);
+    }
+    return Array.from(byKey.values());
+  }, [datasets]);
 
   const fetchAnalysis = async (force: boolean = false) => {
     setLoading(true);
@@ -998,7 +1019,16 @@ export const CategoryAnalysisPage: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {currentCategory.items.map((item, idx) => (
                     <tr key={idx} className="hover:bg-blue-50/30 transition">
-                      <td className="py-2.5 px-4 font-semibold text-slate-800">{item.name}</td>
+                      <td
+                        onClick={() => {
+                          const found = findRecipeForItem(item.name, allRecipes);
+                          if (found) setSelectedRecipe(found);
+                        }}
+                        className="py-2.5 px-4 font-semibold text-blue-700 hover:underline cursor-pointer"
+                        title="Click to view full recipe"
+                      >
+                        {item.name}
+                      </td>
                       <td className="py-2.5 px-4">
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                           {item.size || 'Standard'}
@@ -1186,45 +1216,20 @@ export const CategoryAnalysisPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {[
-                  { cat: 'Pizzas', name: 'CORN PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Corn', cost: 31.08, sale: 100, profit: 68.92, margin: '68.9%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 2 DIP 70', size: 'With Dips 70', cheese: 'Dips Included', cost: 22.00, sale: 70, profit: 48.00, margin: '68.6%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'TANDOORI PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Paneer', cost: 36.69, sale: 100, profit: 63.31, margin: '63.3%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'GREEN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Chutney', cost: 30.00, sale: 80, profit: 50.00, margin: '62.5%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'SCHEZWAN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Schezwan', cost: 36.25, sale: 80, profit: 43.75, margin: '54.7%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'PERI FRIES 55', size: 'Seasoned 55', cheese: 'No Cheese', cost: 24.96, sale: 55, profit: 30.04, margin: '54.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese (Blend)', cost: 27.39, sale: 60, profit: 32.61, margin: '54.4%', cls: 'High Margin' },
-                  { cat: 'Garlic Bread', name: 'VEG CHEESE GARLIC BREAD', size: 'Cheesy 78', cheese: 'With Mozzarella Cheese', cost: 36.60, sale: 78, profit: 41.40, margin: '53.1%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 45', size: 'Standard 45', cheese: 'No Cheese', cost: 21.40, sale: 45, profit: 23.60, margin: '52.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANGY CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 19.60, sale: 40, profit: 20.40, margin: '51.0%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN TWISTER 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 24.70, sale: 50, profit: 25.30, margin: '50.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'PERI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'MARGHERITA PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 25.95, sale: 50, profit: 24.05, margin: '48.1%', cls: 'High Margin' },
-                  { cat: 'Sandwiches', name: 'FLAVOURED MAYO SANDWICH 75', size: 'Premium 75', cheese: 'Without Cheese', cost: 39.73, sale: 75, profit: 35.27, margin: '47.0%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese', cost: 32.39, sale: 60, profit: 27.61, margin: '46.0%', cls: 'Medium Margin' },
-                  { cat: 'Pizzas', name: 'VEG PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 27.95, sale: 50, profit: 22.05, margin: '44.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'PERI PERI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 45', size: 'Bigger (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 45, profit: 19.25, margin: '42.8%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 29', size: 'Regular (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 29, profit: 12.20, margin: '42.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 29.70, sale: 50, profit: 20.30, margin: '40.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SIMPLY VEG 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.30, sale: 30, profit: 11.70, margin: '39.0%', cls: 'Medium Margin' },
-                  { cat: 'Garlic Bread', name: 'PLAIN GARLIC BREAD', size: 'Standard 36', cheese: 'Without Cheese', cost: 36.25, sale: 59, profit: 22.75, margin: '38.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 24.89, sale: 40, profit: 15.11, margin: '37.8%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANGY 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 25', size: 'Small (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 25, profit: 8.20, margin: '32.8%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 30', size: 'Medium (300ml)', cheese: 'No Cheese', cost: 20.30, sale: 30, profit: 9.70, margin: '32.3%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 35', size: 'Large (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 35, profit: 9.25, margin: '26.4%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'MAYO SANDWICH 45', size: 'Standard 45', cheese: 'Without Cheese', cost: 37.03, sale: 45, profit: 7.97, margin: '17.7%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER SANDWICH 30', size: 'Simple 30', cheese: 'Without Cheese', cost: 24.88, sale: 30, profit: 5.12, margin: '17.1%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'CHEESE MAYO SANDWICH 65', size: 'Cheesy 65', cheese: 'With Cheese', cost: 54.03, sale: 65, profit: 10.97, margin: '16.9%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER CHUTNEY 35', size: 'Simple 35', cheese: 'Without Cheese', cost: 29.38, sale: 35, profit: 5.62, margin: '16.1%', cls: 'Low Margin' },
-                ].map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 transition">
-                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.cat}</td>
-                    <td className="py-2.5 px-4 font-bold text-slate-900">{item.name}</td>
+                {allRecipes.map((item, idx) => (
+                  <tr
+                    key={`${item.name}-${idx}`}
+                    onClick={() => setSelectedRecipe(item)}
+                    className="hover:bg-blue-50/60 transition cursor-pointer"
+                    title="Click to view full ingredient recipe"
+                  >
+                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
+                    <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline flex items-center gap-1.5">
+                      <span>{item.name}</span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Recipe ({item.ingredients.length})
+                      </span>
+                    </td>
                     <td className="py-2.5 px-4">
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                         {item.size}
@@ -1232,7 +1237,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-4 font-medium text-slate-600">{item.cheese}</td>
                     <td className="py-2.5 px-4 text-right font-medium text-rose-700 tabular-nums">
-                      ₹{item.cost.toFixed(2)}
+                      ₹{item.making.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
                       ₹{item.sale.toFixed(2)}
@@ -1241,7 +1246,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                       ₹{item.profit.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-center font-extrabold text-slate-800">
-                      {item.margin}
+                      {item.marginPct.toFixed(1)}%
                     </td>
                     <td className="py-2.5 px-4 text-center">
                       <span
@@ -1376,45 +1381,20 @@ export const CategoryAnalysisPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {[
-                  { cat: 'Pizzas', name: 'CORN PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Corn', cost: 31.08, sale: 100, profit: 68.92, margin: '68.9%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 2 DIP 70', size: 'With Dips 70', cheese: 'Dips Included', cost: 22.00, sale: 70, profit: 48.00, margin: '68.6%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'TANDOORI PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Paneer', cost: 36.69, sale: 100, profit: 63.31, margin: '63.3%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'GREEN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Chutney', cost: 30.00, sale: 80, profit: 50.00, margin: '62.5%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'SCHEZWAN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Schezwan', cost: 36.25, sale: 80, profit: 43.75, margin: '54.7%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'PERI FRIES 55', size: 'Seasoned 55', cheese: 'No Cheese', cost: 24.96, sale: 55, profit: 30.04, margin: '54.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese (Blend)', cost: 27.39, sale: 60, profit: 32.61, margin: '54.4%', cls: 'High Margin' },
-                  { cat: 'Garlic Bread', name: 'VEG CHEESE GARLIC BREAD', size: 'Cheesy 78', cheese: 'With Mozzarella Cheese', cost: 36.60, sale: 78, profit: 41.40, margin: '53.1%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 45', size: 'Standard 45', cheese: 'No Cheese', cost: 21.40, sale: 45, profit: 23.60, margin: '52.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANGY CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 19.60, sale: 40, profit: 20.40, margin: '51.0%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN TWISTER 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 24.70, sale: 50, profit: 25.30, margin: '50.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'PERI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'MARGHERITA PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 25.95, sale: 50, profit: 24.05, margin: '48.1%', cls: 'High Margin' },
-                  { cat: 'Sandwiches', name: 'FLAVOURED MAYO SANDWICH 75', size: 'Premium 75', cheese: 'Without Cheese', cost: 39.73, sale: 75, profit: 35.27, margin: '47.0%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese', cost: 32.39, sale: 60, profit: 27.61, margin: '46.0%', cls: 'Medium Margin' },
-                  { cat: 'Pizzas', name: 'VEG PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 27.95, sale: 50, profit: 22.05, margin: '44.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'PERI PERI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 45', size: 'Bigger (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 45, profit: 19.25, margin: '42.8%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 29', size: 'Regular (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 29, profit: 12.20, margin: '42.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 29.70, sale: 50, profit: 20.30, margin: '40.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SIMPLY VEG 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.30, sale: 30, profit: 11.70, margin: '39.0%', cls: 'Medium Margin' },
-                  { cat: 'Garlic Bread', name: 'PLAIN GARLIC BREAD', size: 'Standard 36', cheese: 'Without Cheese', cost: 36.25, sale: 59, profit: 22.75, margin: '38.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 24.89, sale: 40, profit: 15.11, margin: '37.8%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANGY 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 25', size: 'Small (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 25, profit: 8.20, margin: '32.8%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 30', size: 'Medium (300ml)', cheese: 'No Cheese', cost: 20.30, sale: 30, profit: 9.70, margin: '32.3%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 35', size: 'Large (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 35, profit: 9.25, margin: '26.4%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'MAYO SANDWICH 45', size: 'Standard 45', cheese: 'Without Cheese', cost: 37.03, sale: 45, profit: 7.97, margin: '17.7%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER SANDWICH 30', size: 'Simple 30', cheese: 'Without Cheese', cost: 24.88, sale: 30, profit: 5.12, margin: '17.1%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'CHEESE MAYO SANDWICH 65', size: 'Cheesy 65', cheese: 'With Cheese', cost: 54.03, sale: 65, profit: 10.97, margin: '16.9%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER CHUTNEY 35', size: 'Simple 35', cheese: 'Without Cheese', cost: 29.38, sale: 35, profit: 5.62, margin: '16.1%', cls: 'Low Margin' },
-                ].map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 transition">
-                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.cat}</td>
-                    <td className="py-2.5 px-4 font-bold text-slate-900">{item.name}</td>
+                {allRecipes.map((item, idx) => (
+                  <tr
+                    key={`${item.name}-${idx}`}
+                    onClick={() => setSelectedRecipe(item)}
+                    className="hover:bg-blue-50/60 transition cursor-pointer"
+                    title="Click to view full ingredient recipe"
+                  >
+                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
+                    <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline flex items-center gap-1.5">
+                      <span>{item.name}</span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Recipe ({item.ingredients.length})
+                      </span>
+                    </td>
                     <td className="py-2.5 px-4">
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                         {item.size}
@@ -1422,7 +1402,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-4 font-medium text-slate-600">{item.cheese}</td>
                     <td className="py-2.5 px-4 text-right font-medium text-rose-700 tabular-nums">
-                      ₹{item.cost.toFixed(2)}
+                      ₹{item.making.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
                       ₹{item.sale.toFixed(2)}
@@ -1431,7 +1411,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                       ₹{item.profit.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-center font-extrabold text-slate-800">
-                      {item.margin}
+                      {item.marginPct.toFixed(1)}%
                     </td>
                     <td className="py-2.5 px-4 text-center">
                       <span
@@ -1548,45 +1528,20 @@ export const CategoryAnalysisPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {[
-                  { cat: 'Pizzas', name: 'CORN PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Corn', cost: 31.08, sale: 100, profit: 68.92, margin: '68.9%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 2 DIP 70', size: 'With Dips 70', cheese: 'Dips Included', cost: 22.00, sale: 70, profit: 48.00, margin: '68.6%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'TANDOORI PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Paneer', cost: 36.69, sale: 100, profit: 63.31, margin: '63.3%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'GREEN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Chutney', cost: 30.00, sale: 80, profit: 50.00, margin: '62.5%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'SCHEZWAN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Schezwan', cost: 36.25, sale: 80, profit: 43.75, margin: '54.7%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'PERI FRIES 55', size: 'Seasoned 55', cheese: 'No Cheese', cost: 24.96, sale: 55, profit: 30.04, margin: '54.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese (Blend)', cost: 27.39, sale: 60, profit: 32.61, margin: '54.4%', cls: 'High Margin' },
-                  { cat: 'Garlic Bread', name: 'VEG CHEESE GARLIC BREAD', size: 'Cheesy 78', cheese: 'With Mozzarella Cheese', cost: 36.60, sale: 78, profit: 41.40, margin: '53.1%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 45', size: 'Standard 45', cheese: 'No Cheese', cost: 21.40, sale: 45, profit: 23.60, margin: '52.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANGY CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 19.60, sale: 40, profit: 20.40, margin: '51.0%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN TWISTER 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 24.70, sale: 50, profit: 25.30, margin: '50.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'PERI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'MARGHERITA PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 25.95, sale: 50, profit: 24.05, margin: '48.1%', cls: 'High Margin' },
-                  { cat: 'Sandwiches', name: 'FLAVOURED MAYO SANDWICH 75', size: 'Premium 75', cheese: 'Without Cheese', cost: 39.73, sale: 75, profit: 35.27, margin: '47.0%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese', cost: 32.39, sale: 60, profit: 27.61, margin: '46.0%', cls: 'Medium Margin' },
-                  { cat: 'Pizzas', name: 'VEG PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 27.95, sale: 50, profit: 22.05, margin: '44.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'PERI PERI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 45', size: 'Bigger (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 45, profit: 19.25, margin: '42.8%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 29', size: 'Regular (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 29, profit: 12.20, margin: '42.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 29.70, sale: 50, profit: 20.30, margin: '40.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SIMPLY VEG 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.30, sale: 30, profit: 11.70, margin: '39.0%', cls: 'Medium Margin' },
-                  { cat: 'Garlic Bread', name: 'PLAIN GARLIC BREAD', size: 'Standard 36', cheese: 'Without Cheese', cost: 36.25, sale: 59, profit: 22.75, margin: '38.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 24.89, sale: 40, profit: 15.11, margin: '37.8%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANGY 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 25', size: 'Small (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 25, profit: 8.20, margin: '32.8%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 30', size: 'Medium (300ml)', cheese: 'No Cheese', cost: 20.30, sale: 30, profit: 9.70, margin: '32.3%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 35', size: 'Large (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 35, profit: 9.25, margin: '26.4%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'MAYO SANDWICH 45', size: 'Standard 45', cheese: 'Without Cheese', cost: 37.03, sale: 45, profit: 7.97, margin: '17.7%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER SANDWICH 30', size: 'Simple 30', cheese: 'Without Cheese', cost: 24.88, sale: 30, profit: 5.12, margin: '17.1%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'CHEESE MAYO SANDWICH 65', size: 'Cheesy 65', cheese: 'With Cheese', cost: 54.03, sale: 65, profit: 10.97, margin: '16.9%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER CHUTNEY 35', size: 'Simple 35', cheese: 'Without Cheese', cost: 29.38, sale: 35, profit: 5.62, margin: '16.1%', cls: 'Low Margin' },
-                ].map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 transition">
-                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.cat}</td>
-                    <td className="py-2.5 px-4 font-bold text-slate-900">{item.name}</td>
+                {allRecipes.map((item, idx) => (
+                  <tr
+                    key={`${item.name}-${idx}`}
+                    onClick={() => setSelectedRecipe(item)}
+                    className="hover:bg-blue-50/60 transition cursor-pointer"
+                    title="Click to view full ingredient recipe"
+                  >
+                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
+                    <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline flex items-center gap-1.5">
+                      <span>{item.name}</span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Recipe ({item.ingredients.length})
+                      </span>
+                    </td>
                     <td className="py-2.5 px-4">
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                         {item.size}
@@ -1594,7 +1549,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-4 font-medium text-slate-600">{item.cheese}</td>
                     <td className="py-2.5 px-4 text-right font-medium text-rose-700 tabular-nums">
-                      ₹{item.cost.toFixed(2)}
+                      ₹{item.making.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
                       ₹{item.sale.toFixed(2)}
@@ -1603,7 +1558,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                       ₹{item.profit.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-center font-extrabold text-slate-800">
-                      {item.margin}
+                      {item.marginPct.toFixed(1)}%
                     </td>
                     <td className="py-2.5 px-4 text-center">
                       <span
@@ -1747,45 +1702,20 @@ export const CategoryAnalysisPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {[
-                  { cat: 'Pizzas', name: 'CORN PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Corn', cost: 31.08, sale: 100, profit: 68.92, margin: '68.9%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 2 DIP 70', size: 'With Dips 70', cheese: 'Dips Included', cost: 22.00, sale: 70, profit: 48.00, margin: '68.6%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'TANDOORI PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Paneer', cost: 36.69, sale: 100, profit: 63.31, margin: '63.3%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'GREEN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Chutney', cost: 30.00, sale: 80, profit: 50.00, margin: '62.5%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'SCHEZWAN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Schezwan', cost: 36.25, sale: 80, profit: 43.75, margin: '54.7%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'PERI FRIES 55', size: 'Seasoned 55', cheese: 'No Cheese', cost: 24.96, sale: 55, profit: 30.04, margin: '54.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese (Blend)', cost: 27.39, sale: 60, profit: 32.61, margin: '54.4%', cls: 'High Margin' },
-                  { cat: 'Garlic Bread', name: 'VEG CHEESE GARLIC BREAD', size: 'Cheesy 78', cheese: 'With Mozzarella Cheese', cost: 36.60, sale: 78, profit: 41.40, margin: '53.1%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 45', size: 'Standard 45', cheese: 'No Cheese', cost: 21.40, sale: 45, profit: 23.60, margin: '52.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANGY CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 19.60, sale: 40, profit: 20.40, margin: '51.0%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN TWISTER 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 24.70, sale: 50, profit: 25.30, margin: '50.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'PERI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'MARGHERITA PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 25.95, sale: 50, profit: 24.05, margin: '48.1%', cls: 'High Margin' },
-                  { cat: 'Sandwiches', name: 'FLAVOURED MAYO SANDWICH 75', size: 'Premium 75', cheese: 'Without Cheese', cost: 39.73, sale: 75, profit: 35.27, margin: '47.0%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese', cost: 32.39, sale: 60, profit: 27.61, margin: '46.0%', cls: 'Medium Margin' },
-                  { cat: 'Pizzas', name: 'VEG PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 27.95, sale: 50, profit: 22.05, margin: '44.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'PERI PERI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 45', size: 'Bigger (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 45, profit: 19.25, margin: '42.8%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 29', size: 'Regular (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 29, profit: 12.20, margin: '42.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 29.70, sale: 50, profit: 20.30, margin: '40.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SIMPLY VEG 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.30, sale: 30, profit: 11.70, margin: '39.0%', cls: 'Medium Margin' },
-                  { cat: 'Garlic Bread', name: 'PLAIN GARLIC BREAD', size: 'Standard 36', cheese: 'Without Cheese', cost: 36.25, sale: 59, profit: 22.75, margin: '38.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 24.89, sale: 40, profit: 15.11, margin: '37.8%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANGY 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 25', size: 'Small (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 25, profit: 8.20, margin: '32.8%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 30', size: 'Medium (300ml)', cheese: 'No Cheese', cost: 20.30, sale: 30, profit: 9.70, margin: '32.3%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 35', size: 'Large (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 35, profit: 9.25, margin: '26.4%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'MAYO SANDWICH 45', size: 'Standard 45', cheese: 'Without Cheese', cost: 37.03, sale: 45, profit: 7.97, margin: '17.7%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER SANDWICH 30', size: 'Simple 30', cheese: 'Without Cheese', cost: 24.88, sale: 30, profit: 5.12, margin: '17.1%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'CHEESE MAYO SANDWICH 65', size: 'Cheesy 65', cheese: 'With Cheese', cost: 54.03, sale: 65, profit: 10.97, margin: '16.9%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER CHUTNEY 35', size: 'Simple 35', cheese: 'Without Cheese', cost: 29.38, sale: 35, profit: 5.62, margin: '16.1%', cls: 'Low Margin' },
-                ].map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 transition">
-                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.cat}</td>
-                    <td className="py-2.5 px-4 font-bold text-slate-900">{item.name}</td>
+                {allRecipes.map((item, idx) => (
+                  <tr
+                    key={`${item.name}-${idx}`}
+                    onClick={() => setSelectedRecipe(item)}
+                    className="hover:bg-blue-50/60 transition cursor-pointer"
+                    title="Click to view full ingredient recipe"
+                  >
+                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
+                    <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline flex items-center gap-1.5">
+                      <span>{item.name}</span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Recipe ({item.ingredients.length})
+                      </span>
+                    </td>
                     <td className="py-2.5 px-4">
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                         {item.size}
@@ -1793,7 +1723,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-4 font-medium text-slate-600">{item.cheese}</td>
                     <td className="py-2.5 px-4 text-right font-medium text-rose-700 tabular-nums">
-                      ₹{item.cost.toFixed(2)}
+                      ₹{item.making.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
                       ₹{item.sale.toFixed(2)}
@@ -1802,7 +1732,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                       ₹{item.profit.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-center font-extrabold text-slate-800">
-                      {item.margin}
+                      {item.marginPct.toFixed(1)}%
                     </td>
                     <td className="py-2.5 px-4 text-center">
                       <span
@@ -1933,45 +1863,20 @@ export const CategoryAnalysisPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {[
-                  { cat: 'Pizzas', name: 'CORN PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Corn', cost: 31.08, sale: 100, profit: 68.92, margin: '68.9%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 2 DIP 70', size: 'With Dips 70', cheese: 'Dips Included', cost: 22.00, sale: 70, profit: 48.00, margin: '68.6%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'TANDOORI PIZZA 100', size: 'Premium 100', cheese: 'With Mozzarella + Paneer', cost: 36.69, sale: 100, profit: 63.31, margin: '63.3%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'GREEN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Chutney', cost: 30.00, sale: 80, profit: 50.00, margin: '62.5%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'SCHEZWAN PIZZA 80', size: 'Deluxe 80', cheese: 'With Mozzarella & Schezwan', cost: 36.25, sale: 80, profit: 43.75, margin: '54.7%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'PERI FRIES 55', size: 'Seasoned 55', cheese: 'No Cheese', cost: 24.96, sale: 55, profit: 30.04, margin: '54.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese (Blend)', cost: 27.39, sale: 60, profit: 32.61, margin: '54.4%', cls: 'High Margin' },
-                  { cat: 'Garlic Bread', name: 'VEG CHEESE GARLIC BREAD', size: 'Cheesy 78', cheese: 'With Mozzarella Cheese', cost: 36.60, sale: 78, profit: 41.40, margin: '53.1%', cls: 'High Margin' },
-                  { cat: 'French Fries', name: 'FRIES 45', size: 'Standard 45', cheese: 'No Cheese', cost: 21.40, sale: 45, profit: 23.60, margin: '52.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANGY CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 19.60, sale: 40, profit: 20.40, margin: '51.0%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'GREEN TWISTER 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 24.70, sale: 50, profit: 25.30, margin: '50.6%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Burgers', name: 'PERI CHEEZY 50', size: 'Cheesy 50', cheese: 'With Cheese', cost: 25.29, sale: 50, profit: 24.71, margin: '49.4%', cls: 'High Margin' },
-                  { cat: 'Pizzas', name: 'MARGHERITA PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 25.95, sale: 50, profit: 24.05, margin: '48.1%', cls: 'High Margin' },
-                  { cat: 'Sandwiches', name: 'FLAVOURED MAYO SANDWICH 75', size: 'Premium 75', cheese: 'Without Cheese', cost: 39.73, sale: 75, profit: 35.27, margin: '47.0%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN CHEEZY 60', size: 'Cheesy 60', cheese: 'With Cheese', cost: 32.39, sale: 60, profit: 27.61, margin: '46.0%', cls: 'Medium Margin' },
-                  { cat: 'Pizzas', name: 'VEG PIZZA 50', size: 'Standard 50', cheese: 'With Mozzarella', cost: 27.95, sale: 50, profit: 22.05, margin: '44.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANDOORI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'PERI PERI 40', size: 'Premium 40', cheese: 'Without Cheese', cost: 22.60, sale: 40, profit: 17.40, margin: '43.5%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 45', size: 'Bigger (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 45, profit: 19.25, margin: '42.8%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'CHOCOLATE 29', size: 'Regular (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 29, profit: 12.20, margin: '42.1%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SCHEZWAN 50', size: 'Deluxe 50', cheese: 'Without Cheese', cost: 29.70, sale: 50, profit: 20.30, margin: '40.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'SIMPLY VEG 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.30, sale: 30, profit: 11.70, margin: '39.0%', cls: 'Medium Margin' },
-                  { cat: 'Garlic Bread', name: 'PLAIN GARLIC BREAD', size: 'Standard 36', cheese: 'Without Cheese', cost: 36.25, sale: 59, profit: 22.75, margin: '38.6%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA CHEEZY 40', size: 'Cheesy 40', cheese: 'With Cheese', cost: 24.89, sale: 40, profit: 15.11, margin: '37.8%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'TANGY 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Burgers', name: 'CHATPATA 30', size: 'Standard 30', cheese: 'Without Cheese', cost: 18.80, sale: 30, profit: 11.20, margin: '37.3%', cls: 'Medium Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 25', size: 'Small (250ml)', cheese: 'No Cheese', cost: 16.80, sale: 25, profit: 8.20, margin: '32.8%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 30', size: 'Medium (300ml)', cheese: 'No Cheese', cost: 20.30, sale: 30, profit: 9.70, margin: '32.3%', cls: 'Low Margin' },
-                  { cat: 'Beverages', name: 'COLD COFFEE 35', size: 'Large (350ml)', cheese: 'No Cheese', cost: 25.75, sale: 35, profit: 9.25, margin: '26.4%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'MAYO SANDWICH 45', size: 'Standard 45', cheese: 'Without Cheese', cost: 37.03, sale: 45, profit: 7.97, margin: '17.7%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER SANDWICH 30', size: 'Simple 30', cheese: 'Without Cheese', cost: 24.88, sale: 30, profit: 5.12, margin: '17.1%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'CHEESE MAYO SANDWICH 65', size: 'Cheesy 65', cheese: 'With Cheese', cost: 54.03, sale: 65, profit: 10.97, margin: '16.9%', cls: 'Low Margin' },
-                  { cat: 'Sandwiches', name: 'BREAD BUTTER CHUTNEY 35', size: 'Simple 35', cheese: 'Without Cheese', cost: 29.38, sale: 35, profit: 5.62, margin: '16.1%', cls: 'Low Margin' },
-                ].map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 transition">
-                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.cat}</td>
-                    <td className="py-2.5 px-4 font-bold text-slate-900">{item.name}</td>
+                {allRecipes.map((item, idx) => (
+                  <tr
+                    key={`${item.name}-${idx}`}
+                    onClick={() => setSelectedRecipe(item)}
+                    className="hover:bg-blue-50/60 transition cursor-pointer"
+                    title="Click to view full ingredient recipe"
+                  >
+                    <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
+                    <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline flex items-center gap-1.5">
+                      <span>{item.name}</span>
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        Recipe ({item.ingredients.length})
+                      </span>
+                    </td>
                     <td className="py-2.5 px-4">
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                         {item.size}
@@ -1979,7 +1884,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-4 font-medium text-slate-600">{item.cheese}</td>
                     <td className="py-2.5 px-4 text-right font-medium text-rose-700 tabular-nums">
-                      ₹{item.cost.toFixed(2)}
+                      ₹{item.making.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums">
                       ₹{item.sale.toFixed(2)}
@@ -1988,7 +1893,7 @@ export const CategoryAnalysisPage: React.FC = () => {
                       ₹{item.profit.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-4 text-center font-extrabold text-slate-800">
-                      {item.margin}
+                      {item.marginPct.toFixed(1)}%
                     </td>
                     <td className="py-2.5 px-4 text-center">
                       <span
@@ -2007,6 +1912,177 @@ export const CategoryAnalysisPage: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Always-available Food & Beverage Recipe Book (from uploaded Excel + built-in) */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-blue-50/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+              <Utensils className="w-4 h-4 text-blue-600" />
+              <span>Food &amp; Beverage Recipe Book ({allRecipes.length} Items)</span>
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Click any beverage or food item below to see its complete ingredient recipe, making cost, sale price, profit &amp; margin %.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {['All', 'Beverages', 'Burgers', 'Pizzas', 'French Fries', 'Sandwiches', 'Garlic Bread', 'Combos'].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setRecipeCatFilter(cat)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                  recipeCatFilter === cat
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {allRecipes
+            .filter((r) => recipeCatFilter === 'All' || r.category === recipeCatFilter)
+            .map((recipe, idx) => (
+              <button
+                key={`${recipe.name}-${idx}`}
+                onClick={() => setSelectedRecipe(recipe)}
+                className="text-left p-3.5 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 transition-all group space-y-2"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
+                      {recipe.category}
+                    </span>
+                    <h4 className="font-bold text-slate-900 text-sm group-hover:text-blue-700">
+                      {recipe.name}
+                    </h4>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-extrabold shrink-0 ${
+                      recipe.cls === 'High Margin'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : recipe.cls === 'Low Margin'
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {recipe.marginPct.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {recipe.ingredients.slice(0, 4).map((ing, i) => (
+                    <span
+                      key={i}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium"
+                    >
+                      {ing.name}: ₹{ing.cost}
+                    </span>
+                  ))}
+                  {recipe.ingredients.length > 4 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-semibold">
+                      +{recipe.ingredients.length - 4} more
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px] font-semibold">
+                  <span className="text-rose-700">Cost: ₹{recipe.making.toFixed(2)}</span>
+                  <span className="text-slate-700">Sale: ₹{recipe.sale.toFixed(2)}</span>
+                  <span className="text-emerald-700">Profit: ₹{recipe.profit.toFixed(2)}</span>
+                </div>
+              </button>
+            ))}
+        </div>
+      </div>
+
+      {/* Recipe Detail Modal */}
+      {selectedRecipe && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setSelectedRecipe(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-5 bg-gradient-to-r from-slate-900 to-blue-950 text-white flex items-start justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500/30 text-blue-200">
+                    {selectedRecipe.category}
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white/10 text-slate-200">
+                    {selectedRecipe.source === 'excel' ? 'From Uploaded Excel' : 'Standard Recipe'}
+                  </span>
+                </div>
+                <h3 className="text-xl font-extrabold mt-1.5">{selectedRecipe.name}</h3>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  {selectedRecipe.size} • {selectedRecipe.cheese}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedRecipe(null)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Recipe Ingredients &amp; Cost Breakdown
+                </h4>
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                      <tr>
+                        <th className="py-2 px-3 text-left">Ingredient / Material</th>
+                        <th className="py-2 px-3 text-right">Cost / Qty (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedRecipe.ingredients.map((ing, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-semibold text-slate-800">{ing.name}</td>
+                          <td className="py-2 px-3 text-right font-mono font-semibold text-slate-700">
+                            ₹{ing.cost.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-2">
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-100 text-center">
+                  <p className="text-[10px] font-bold uppercase text-rose-600">Making</p>
+                  <p className="text-sm font-extrabold text-rose-800">₹{selectedRecipe.making.toFixed(2)}</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200 text-center">
+                  <p className="text-[10px] font-bold uppercase text-slate-600">Sale</p>
+                  <p className="text-sm font-extrabold text-slate-900">₹{selectedRecipe.sale.toFixed(2)}</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-100 text-center">
+                  <p className="text-[10px] font-bold uppercase text-emerald-600">Profit</p>
+                  <p className="text-sm font-extrabold text-emerald-800">₹{selectedRecipe.profit.toFixed(2)}</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-100 text-center">
+                  <p className="text-[10px] font-bold uppercase text-amber-600">R.M %</p>
+                  <p className="text-sm font-extrabold text-amber-800">{selectedRecipe.rmPct.toFixed(1)}%</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-100 text-center">
+                  <p className="text-[10px] font-bold uppercase text-blue-600">Margin %</p>
+                  <p className="text-sm font-extrabold text-blue-800">{selectedRecipe.marginPct.toFixed(1)}%</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
