@@ -618,14 +618,22 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
         </div>
       </div>
 
-      {modalRecipe && (
-        <RecipeModal
-          recipe={modalRecipe.recipe}
-          clickedItemName={modalRecipe.clickedItemName}
-          outlets={recipeOutlet ? [recipeOutlet] : allOutlets}
-          onClose={() => setModalRecipe(null)}
-        />
-      )}
+      {modalRecipe && (() => {
+        const m = modalRecipe.recipe ? outletMetricsMap.get(modalRecipe.recipe.name) : undefined;
+        return (
+          <RecipeModal
+            recipe={modalRecipe.recipe}
+            clickedItemName={modalRecipe.clickedItemName}
+            outlets={recipeOutlet ? [recipeOutlet] : allOutlets}
+            qtySold={m?.hasSales ? m.qtySold : 1}
+            totalMaking={m?.making}
+            totalSale={m?.sale}
+            totalProfit={m?.profit}
+            marginPct={m?.marginPct}
+            onClose={() => setModalRecipe(null)}
+          />
+        );
+      })()}
     </div>
   );
 };

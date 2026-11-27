@@ -6,6 +6,11 @@ interface RecipeModalProps {
   recipe: RecipeBomItem | null;
   clickedItemName?: string;
   outlets?: string[];
+  qtySold?: number;
+  totalMaking?: number;
+  totalSale?: number;
+  totalProfit?: number;
+  marginPct?: number;
   onClose: () => void;
 }
 
@@ -13,9 +18,19 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({
   recipe,
   clickedItemName,
   outlets = [],
+  qtySold = 0,
+  totalMaking,
+  totalSale,
+  totalProfit,
+  marginPct,
   onClose,
 }) => {
   if (!recipe && !clickedItemName) return null;
+  const effectiveQty = qtySold > 0 ? qtySold : 1;
+  const displayMaking = totalMaking !== undefined ? totalMaking : recipe?.making_cost || 0;
+  const displaySale = totalSale !== undefined ? totalSale : recipe?.sale_price || 0;
+  const displayProfit = totalProfit !== undefined ? totalProfit : recipe?.profit || 0;
+  const displayMargin = marginPct !== undefined ? marginPct : recipe?.margin_pct || 0;
 
   return (
     <div
@@ -32,9 +47,14 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({
               <span className="px-2.5 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-blue-600/30 text-blue-300 border border-blue-400/30">
                 {recipe ? recipe.category : 'Recipe'}
               </span>
-              {recipe && (
+                {recipe && (
                 <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-slate-700 text-slate-200">
                   {recipe.is_combo ? 'Combo Recipe' : 'Standard Recipe'}
+                </span>
+              )}
+              {recipe && (
+                <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-emerald-600/30 text-emerald-200 border border-emerald-400/30">
+                  Qty: {effectiveQty.toLocaleString()} {effectiveQty === 1 ? 'unit' : 'units'}
                 </span>
               )}
             </div>
@@ -72,15 +92,23 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({
                   <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
                     <tr>
                       <th className="py-2.5 px-4">Ingredient / Material</th>
-                      <th className="py-2.5 px-4 text-right">Cost / Qty (₹)</th>
+                      <th className="py-2.5 px-4 text-center">Qty</th>
+                      <th className="py-2.5 px-4 text-right">Unit Price (₹)</th>
+                      <th className="py-2.5 px-4 text-right">Total Cost (₹)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {recipe.ingredients.map((ing, i) => (
                       <tr key={i} className="hover:bg-slate-50/70">
                         <td className="py-2.5 px-4 font-semibold text-slate-800">{ing.name}</td>
-                        <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums font-mono">
+                        <td className="py-2.5 px-4 text-center font-bold text-blue-700 tabular-nums">
+                          {effectiveQty.toLocaleString()}x
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-semibold text-slate-700 tabular-nums font-mono">
                           ₹{ing.cost.toFixed(2)}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-bold text-slate-900 tabular-nums font-mono">
+                          ₹{(ing.cost * effectiveQty).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
                     ))}
@@ -93,31 +121,31 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({
               <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-center">
                 <p className="text-[10px] font-extrabold uppercase text-rose-600">Making</p>
                 <p className="text-base font-black text-rose-700 tabular-nums mt-0.5">
-                  ₹{recipe.making_cost.toFixed(2)}
+                  ₹{displayMaking.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
                 <p className="text-[10px] font-extrabold uppercase text-slate-500">Sale</p>
                 <p className="text-base font-black text-slate-900 tabular-nums mt-0.5">
-                  ₹{recipe.sale_price.toFixed(2)}
+                  ₹{displaySale.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </div>
               <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-center">
                 <p className="text-[10px] font-extrabold uppercase text-emerald-600">Profit</p>
                 <p className="text-base font-black text-emerald-700 tabular-nums mt-0.5">
-                  ₹{recipe.profit.toFixed(2)}
+                  ₹{displayProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </div>
               <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-center">
                 <p className="text-[10px] font-extrabold uppercase text-amber-700">R.M %</p>
                 <p className="text-base font-black text-amber-800 tabular-nums mt-0.5">
-                  {recipe.rm_pct.toFixed(1)}%
+                  {(displaySale > 0 ? (displayMaking / displaySale) * 100 : recipe.rm_pct).toFixed(1)}%
                 </p>
               </div>
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
                 <p className="text-[10px] font-extrabold uppercase text-blue-600">Margin %</p>
                 <p className="text-base font-black text-blue-700 tabular-nums mt-0.5">
-                  {recipe.margin_pct.toFixed(1)}%
+                  {displayMargin.toFixed(1)}%
                 </p>
               </div>
             </div>
