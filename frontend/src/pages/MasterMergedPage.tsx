@@ -8,10 +8,10 @@ import { MasterMergedRow, MasterMergedResponse, Outlet } from '../types';
 import { useUploadedData, UploadResult } from '../context/UploadedDataContext';
 import { fuzzyOutletScore, isTotalRowLabel, normalizeOutletStr } from '../utils/outletFuzzy';
 import { RecipeModal } from '../components/RecipeModal';
+import { DEFAULT_OUTLETS } from '../utils/defaultOutlets';
 import {
   RecipeBomItem,
   DEFAULT_RECIPE_BOM,
-  findMatchingRecipe,
 } from '../utils/recipeBom';
 
 interface MasterMergedPageProps {
@@ -40,6 +40,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
   const [dbRecipeBomFile, setDbRecipeBomFile] = useState<string>('');
   const [recipeCategory, setRecipeCategory] = useState<string>('All');
   const [recipeSearch, setRecipeSearch] = useState<string>('');
+  const [recipeOutlet, setRecipeOutlet] = useState<string>('');
   const [modalRecipe, setModalRecipe] = useState<{
     recipe: RecipeBomItem | null;
     clickedItemName?: string;
@@ -341,10 +342,10 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     });
   }, [bomItems, recipeCategory, recipeSearch]);
 
-  const openRecipeForItem = (itemName: string) => {
-    const matched = findMatchingRecipe(itemName, bomItems);
-    setModalRecipe({ recipe: matched, clickedItemName: itemName });
-  };
+  const allOutlets = useMemo<string[]>(() => {
+    if (outletOptions.length > 0) return outletOptions;
+    return DEFAULT_OUTLETS.map((o) => o.official_name).sort((a, b) => a.localeCompare(b));
+  }, [outletOptions]);
 
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto">
@@ -436,19 +437,34 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
               )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Upload your recipe Excel once above to see all food &amp; beverage items with their ingredients. Click any item to open its full recipe.
+              Click any food or beverage item below to view its full recipe and ingredients.
             </p>
           </div>
 
-          <div className="relative w-full lg:w-64">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search food, beverage, ingredient..."
-              value={recipeSearch}
-              onChange={(e) => setRecipeSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500 bg-white"
-            />
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto">
+            <select
+              value={recipeOutlet}
+              onChange={(e) => setRecipeOutlet(e.target.value)}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-semibold bg-white outline-none focus:border-blue-500 max-w-xs"
+            >
+              <option value="">All Outlets ({allOutlets.length})</option>
+              {allOutlets.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+
+            <div className="relative w-full sm:w-64">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search food or beverage..."
+                value={recipeSearch}
+                onChange={(e) => setRecipeSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500 bg-white"
+              />
+            </div>
           </div>
         </div>
 
@@ -475,7 +491,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
               <tr>
                 <th className="py-2.5 px-4">Category</th>
                 <th className="py-2.5 px-4">Food / Beverage Item</th>
-                <th className="py-2.5 px-4">Recipe Ingredients</th>
+                <th className="py-2.5 px-4">Outlet Name</th>
                 <th className="py-2.5 px-4 text-right">Making (₹)</th>
                 <th className="py-2.5 px-4 text-right">Sale (₹)</th>
                 <th className="py-2.5 px-4 text-right">Profit (₹)</th>
@@ -491,17 +507,12 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
                 >
                   <td className="py-2.5 px-4 font-semibold text-slate-700">{item.category}</td>
                   <td className="py-2.5 px-4 font-bold text-blue-700 hover:underline">{item.name}</td>
-                  <td className="py-2.5 px-4">
-                    <div className="flex flex-wrap gap-1 max-w-md">
-                      {item.ingredients.map((ing, i) => (
-                        <span
-                          key={i}
-                          className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-medium"
-                        >
-                          {ing.name}: ₹{ing.cost}
-                        </span>
-                      ))}
-                    </div>
+                  <td className="py-2.5 px-4 text-slate-600 font-medium">
+                    {recipeOutlet ? (
+                      <span className="text-slate-800 font-semibold">{recipeOutlet}</span>
+                    ) : (
+                      <span className="text-slate-500">All Outlets ({allOutlets.length})</span>
+                    )}
                   </td>
                   <td className="py-2.5 px-4 text-right font-semibold text-rose-700 tabular-nums">
                     ₹{item.making_cost.toFixed(2)}
@@ -526,6 +537,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
         <RecipeModal
           recipe={modalRecipe.recipe}
           clickedItemName={modalRecipe.clickedItemName}
+          outlets={recipeOutlet ? [recipeOutlet] : allOutlets}
           onClose={() => setModalRecipe(null)}
         />
       )}

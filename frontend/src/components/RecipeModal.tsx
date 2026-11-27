@@ -1,16 +1,18 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { X, Store } from 'lucide-react';
 import type { RecipeBomItem } from '../utils/recipeBom';
 
 interface RecipeModalProps {
   recipe: RecipeBomItem | null;
   clickedItemName?: string;
+  outlets?: string[];
   onClose: () => void;
 }
 
 export const RecipeModal: React.FC<RecipeModalProps> = ({
   recipe,
   clickedItemName,
+  outlets = [],
   onClose,
 }) => {
   if (!recipe && !clickedItemName) return null;
@@ -119,6 +121,25 @@ export const RecipeModal: React.FC<RecipeModalProps> = ({
                 </p>
               </div>
             </div>
+
+            {outlets.length > 0 && (
+              <div>
+                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+                  <Store className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Outlets ({outlets.length})</span>
+                </h4>
+                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  {outlets.map((name, i) => (
+                    <span
+                      key={i}
+                      className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[11px] font-semibold text-slate-700"
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-6 text-center space-y-2">
