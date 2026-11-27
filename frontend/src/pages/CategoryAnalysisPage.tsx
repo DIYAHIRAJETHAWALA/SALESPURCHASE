@@ -154,12 +154,15 @@ export const CategoryAnalysisPage: React.FC = () => {
     setError(null);
     try {
       const res = await fetch(`/api/analytics/category-analysis${force ? '?force_refresh=true' : ''}`);
-      if (!res.ok) throw new Error('Failed to load category analysis');
+      if (!res.ok) {
+        setDbData(null);
+        return;
+      }
       const json = await res.json();
       setDbData(json);
-    } catch (err: any) {
-      // If backend DB is empty or offline, uploaded Excel datasets can still power the view
-      setError(datasets.length === 0 ? (err.message || 'Error loading analysis') : null);
+    } catch {
+      // Backend DB may be empty or offline; uploaded Excel datasets can still power the view
+      setDbData(null);
     } finally {
       setLoading(false);
     }
@@ -499,6 +502,28 @@ export const CategoryAnalysisPage: React.FC = () => {
           <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0" />
           <span>{error}</span>
         </div>
+      )}
+
+      {(!data ||
+        (Object.keys(data.categories || {}).length === 0 &&
+          (data.outlet_summary || []).length === 0 &&
+          (data.grand_summary || []).length === 0)) && (
+        <label className="block border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white rounded-2xl p-10 text-center cursor-pointer transition-colors">
+          <Upload className="w-10 h-10 text-blue-500 mx-auto mb-3" />
+          <p className="text-base font-bold text-slate-800">
+            Upload Excel / CSV files to view Category &amp; Recipe BI
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Drop or click to upload one or multiple outlet reports (e.g. Burgers, Beverages, Sales &amp; Purchase).
+          </p>
+          <input
+            type="file"
+            multiple
+            accept=".xlsx,.xlsm,.xls,.csv"
+            className="hidden"
+            onChange={handleQuickUpload}
+          />
+        </label>
       )}
 
       {/* Navigation Tabs */}

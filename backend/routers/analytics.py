@@ -614,11 +614,18 @@ def get_category_analysis(force_refresh: bool = False):
     import openpyxl
     import os
 
-    excel_path = os.path.join("d:\\SPpro", "Consolidated_Sales_Purchase_Analysis_Report.xlsx")
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    excel_path = os.path.join(base_dir, "Consolidated_Sales_Purchase_Analysis_Report.xlsx")
     if not os.path.exists(excel_path):
-        excel_path = os.path.join("d:\\SPpro", "reports", "Item_Wise_Category_Sales_Purchase_Analysis.xlsx")
+        excel_path = os.path.join(base_dir, "reports", "Item_Wise_Category_Sales_Purchase_Analysis.xlsx")
     if not os.path.exists(excel_path):
-        raise HTTPException(status_code=404, detail="Consolidated report file not found on server.")
+        return {
+            "categories": {},
+            "combos": [],
+            "recipes": [],
+            "outlet_summary": [],
+            "grand_summary": [],
+        }
 
     def to_float(val, default=0.0):
         if val is None or val == '' or val == '-':
