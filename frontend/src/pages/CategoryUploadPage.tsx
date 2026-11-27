@@ -22,9 +22,12 @@ import {
 
 export const CategoryUploadPage: React.FC = () => {
   const { datasets, setDatasets } = useUploadedData();
-  const [activeCategoryIdx, setActiveCategoryIdx] = useState<number>(0);
+  // -1 = Merged view, 0+ = individual file tab
+  const [activeCategoryIdx, setActiveCategoryIdx] = useState<number>(-1);
   const [activeRawSheetIdx, setActiveRawSheetIdx] = useState<number>(0);
-  const [selectedOutlet, setSelectedOutlet] = useState<string>('');
+  const [selectedOutlet, setSelectedOutlet] = useState<string>(() =>
+    datasets.length > 0 ? '__ALL__' : ''
+  );
   const [selectedItem, setSelectedItem] = useState<string>('__SUMMARY__');
   // Date / period controls
   const [startDate, setStartDate] = useState<string>('');
@@ -36,7 +39,53 @@ export const CategoryUploadPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const data = datasets[activeCategoryIdx] || null;
+  // When activeCategoryIdx is -1 → merged view; else show that specific dataset
+  const data = activeCategoryIdx >= 0 ? (datasets[activeCategoryIdx] || null) : null;
+
+  // ── Merged data across ALL datasets ──────────────────────────────────────
+  const mergedData = useMemo(() => {
+    if (datasets.length === 0) return null;
+    // Collect all outlets across all datasets, merge items by outlet key
+    const outletMap = new Map<string, OutletData>();
+    for (const ds of datasets) {
+      for (const o of ds.outlets) {
+        const key = o.outlet.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (outletMap.has(key)) {
+          const existing = outletMap.get(key)!;
+          // Merge items
+          existing.items = [...existing.items, ...o.items];
+          // Merge summary
+          existing.summary.individual_sales += o.summary.individual_sales;
+          existing.summary.combo_sales += o.summary.combo_sales;
+          existing.summary.total_sales_qty += o.summary.total_sales_qty;
+          existing.summary.purchase_packs += o.summary.purchase_packs;
+          existing.summary.purchase_units += o.summary.purchase_units;
+        } else {
+          outletMap.set(key, {
+            outlet: o.outlet,
+            items: [...o.items],
+            summary: { ...o.summary },
+          });
+        }
+      }
+    }
+    const outlets = Array.from(outletMap.values());
+    // Recalculate RMD for merged
+    for (const o of outlets) {
+      o.summary.rmd_pct = o.summary.purchase_units > 0
+        ? Math.round((o.summary.total_sales_qty / o.summary.purchase_units) * 10000) / 100
+        : 0;
+    }
+    return {
+      filename: `${datasets.length} files merged`,
+      category: `All Files Merged (${datasets.length})`,
+      outlets,
+      raw_sheets: datasets.flatMap(d => d.raw_sheets || []),
+    } as unknown as UploadResult;
+  }, [datasets]);
+
+  // Active data: merged or single file
+  const activeData = activeCategoryIdx === -1 ? mergedData : data;
 
   const handleFilesUpload = async (files: FileList | File[], sdOverride?: string, edOverride?: string, labelOverride?: string) => {
     const fileArr = Array.from(files);
@@ -72,9 +121,10 @@ export const CategoryUploadPage: React.FC = () => {
         for (const u of uploaded) existing.set(u.filename, u);
         return [...existing.values()];
       });
-      setActiveCategoryIdx(datasets.length > 0 ? datasets.length : 0);
+      // Always switch to Merged view after upload so ALL files are visible together
+      setActiveCategoryIdx(-1);
       setActiveRawSheetIdx(0);
-      setSelectedOutlet(uploaded[0]?.outlets.length > 0 ? '__ALL__' : '');
+      setSelectedOutlet('__ALL__');
       setSelectedItem('__SUMMARY__');
       setItemSearch('');
     } catch (err: any) {
@@ -87,13 +137,14 @@ export const CategoryUploadPage: React.FC = () => {
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       handleFilesUpload(e.target.files);
+      e.target.value = '';
     }
   };
 
   const handleCategorySwitch = (idx: number) => {
     setActiveCategoryIdx(idx);
     setActiveRawSheetIdx(0);
-    const nextData = datasets[idx];
+    const nextData = idx === -1 ? mergedData : datasets[idx];
     if (selectedOutlet !== '__ALL__' && nextData && !nextData.outlets.some((o) => o.outlet === selectedOutlet)) {
       setSelectedOutlet('__ALL__');
     }
@@ -101,10 +152,10 @@ export const CategoryUploadPage: React.FC = () => {
   };
 
   const uniqueItemNames = useMemo(() => {
-    if (!data) return [];
+    if (!activeData) return [];
     const seen = new Set<string>();
     const names: string[] = [];
-    for (const o of data.outlets) {
+    for (const o of activeData.outlets) {
       for (const it of o.items) {
         if (!seen.has(it.name)) {
           seen.add(it.name);
@@ -113,30 +164,30 @@ export const CategoryUploadPage: React.FC = () => {
       }
     }
     return names;
-  }, [data]);
+  }, [activeData]);
 
   const activeOutletData = useMemo(() => {
-    if (!data || !selectedOutlet || selectedOutlet === '__ALL__') return null;
-    return data.outlets.find((o) => o.outlet === selectedOutlet) || null;
-  }, [data, selectedOutlet]);
+    if (!activeData || !selectedOutlet || selectedOutlet === '__ALL__') return null;
+    return activeData.outlets.find((o) => o.outlet === selectedOutlet) || null;
+  }, [activeData, selectedOutlet]);
 
   const filteredOutlets = useMemo(() => {
-    if (!data) return [];
+    if (!activeData) return [];
     const q = itemSearch.trim().toLowerCase();
-    return data.outlets.filter((o) => {
+    return activeData.outlets.filter((o) => {
       if (!q) return true;
       return (
         o.outlet.toLowerCase().includes(q) ||
         o.items.some((it) => it.sales_qty > 0 && it.name.toLowerCase().includes(q))
       );
     });
-  }, [data, itemSearch]);
+  }, [activeData, itemSearch]);
 
   const filteredAllOutletItems = useMemo(() => {
-    if (!data || selectedOutlet !== '__ALL__' || selectedItem === '__SUMMARY__') return [];
+    if (!activeData || selectedOutlet !== '__ALL__' || selectedItem === '__SUMMARY__') return [];
     const q = itemSearch.trim().toLowerCase();
     const rows: Array<{ outlet: string; item: ItemRow }> = [];
-    for (const o of data.outlets) {
+    for (const o of activeData.outlets) {
       for (const it of o.items) {
         if (selectedItem !== '__ALL_ITEMS__' && it.name !== selectedItem) continue;
         if (hideZeroSales && it.sales_qty === 0) continue;
@@ -153,7 +204,7 @@ export const CategoryUploadPage: React.FC = () => {
       }
     }
     return rows;
-  }, [data, selectedOutlet, selectedItem, itemSearch, hideZeroSales]);
+  }, [activeData, selectedOutlet, selectedItem, itemSearch, hideZeroSales]);
 
   const filteredItems = useMemo(() => {
     if (!activeOutletData) return [];
@@ -218,7 +269,7 @@ export const CategoryUploadPage: React.FC = () => {
 
           <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-sm cursor-pointer transition-colors">
             <UploadCloud className="w-4 h-4" />
-            <span>{loading ? 'Processing...' : data ? 'Upload Another File' : 'Upload Excel / CSV'}</span>
+            <span>{loading ? 'Processing...' : activeData ? 'Upload Another File' : 'Upload Excel / CSV'}</span>
             <input
               type="file"
               accept=".xlsx,.xlsm,.xls,.csv"
@@ -229,11 +280,12 @@ export const CategoryUploadPage: React.FC = () => {
             />
           </label>
 
-          {data && (
+          {datasets.length > 0 && (
             <button
               type="button"
               onClick={() => {
                 setDatasets([]);
+                setActiveCategoryIdx(-1);
                 setSelectedOutlet('');
                 setSelectedItem('__SUMMARY__');
                 setItemSearch('');
@@ -295,7 +347,7 @@ export const CategoryUploadPage: React.FC = () => {
       )}
 
       {/* Empty State Dropzone */}
-      {!data && !loading && (
+      {!activeData && !loading && (
         <label className="block border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white rounded-2xl p-12 text-center cursor-pointer transition-colors">
           <UploadCloud className="w-12 h-12 text-blue-500 mx-auto mb-3" />
           <p className="text-base font-semibold text-slate-800">
@@ -315,11 +367,23 @@ export const CategoryUploadPage: React.FC = () => {
       )}
 
       {/* Loaded Content */}
-      {data && (
+      {activeData && (
         <>
-          {/* Category Switcher Tabs when multiple Excel files are uploaded */}
-          {datasets.length > 1 && (
+          {/* File Tabs — Merged first, then each individual file */}
+          {datasets.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
+              {/* Merged tab */}
+              <button
+                onClick={() => handleCategorySwitch(-1)}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex items-center gap-1.5 ${
+                  activeCategoryIdx === -1
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                📊 All Files Merged ({datasets.length})
+              </button>
+              {/* Individual file tabs */}
               {datasets.map((ds, idx) => (
                 <button
                   key={`${ds.filename}-${idx}`}
@@ -343,32 +407,32 @@ export const CategoryUploadPage: React.FC = () => {
               </div>
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Loaded Category Workbook
+                  {activeCategoryIdx === -1 ? 'All Files Merged' : 'Loaded Category Workbook'}
                 </div>
                 <div className="text-base font-bold text-slate-900">
-                  {data.category}{' '}
+                  {activeData.category}{' '}
                   <span className="text-xs font-normal text-slate-500">
-                    ({data.filename} • {data.outlets.length} outlets)
+                    ({activeData.filename} • {activeData.outlets.length} outlets)
                   </span>
-                  {(data.start_date || data.week_label || data.month_label || (data.period_label && data.period_label !== data.filename)) && (
+                  {activeCategoryIdx >= 0 && (data?.start_date || data?.week_label || data?.month_label || (data?.period_label && data?.period_label !== data?.filename)) && (
                     <div className="text-xs font-normal text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
-                      {data.period_label && data.period_label !== data.filename && (
+                      {data?.period_label && data?.period_label !== data?.filename && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold">
                           {data.period_label}
                         </span>
                       )}
-                      {data.start_date && (
+                      {data?.start_date && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-semibold">
                           <Calendar className="w-3 h-3" />
                           {data.start_date}{data.end_date ? ` → ${data.end_date}` : ''}
                         </span>
                       )}
-                      {data.week_label && (
+                      {data?.week_label && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold">
                           {data.week_label}
                         </span>
                       )}
-                      {data.month_label && (
+                      {data?.month_label && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-semibold">
                           {data.month_label}
                         </span>
@@ -380,7 +444,7 @@ export const CategoryUploadPage: React.FC = () => {
             </div>
 
             {/* Outlet & Item Selectors */}
-            {data.outlets.length > 0 && (
+            {activeData.outlets.length > 0 && (
               <div className="flex flex-col md:flex-row md:items-center gap-3">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
@@ -401,8 +465,8 @@ export const CategoryUploadPage: React.FC = () => {
                     }}
                     className="w-full sm:w-72 px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="__ALL__">All Outlets ({data.outlets.length})</option>
-                    {data.outlets.map((o) => (
+                    <option value="__ALL__">All Outlets ({activeData.outlets.length})</option>
+                    {activeData.outlets.map((o) => (
                       <option key={o.outlet} value={o.outlet}>
                         {o.outlet}
                       </option>
@@ -437,8 +501,8 @@ export const CategoryUploadPage: React.FC = () => {
           </div>
 
           {/* Generic Table Fallback for any unknown spreadsheet */}
-          {data.outlets.length === 0 && data.raw_sheets && data.raw_sheets.length > 0 && (() => {
-            const activeSheet = data.raw_sheets[activeRawSheetIdx] || data.raw_sheets[0];
+          {activeData.outlets.length === 0 && activeData.raw_sheets && activeData.raw_sheets.length > 0 && (() => {
+            const activeSheet = activeData.raw_sheets[activeRawSheetIdx] || activeData.raw_sheets[0];
             const q = itemSearch.trim().toLowerCase();
             const visibleRows = q
               ? activeSheet.rows.filter((r) => r.some((cell) => cell.toLowerCase().includes(q)))
@@ -448,7 +512,7 @@ export const CategoryUploadPage: React.FC = () => {
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    {data.raw_sheets.map((sh, idx) => (
+                    {activeData.raw_sheets.map((sh, idx) => (
                       <button
                         key={`${sh.sheet_name}-${idx}`}
                         type="button"
@@ -535,7 +599,7 @@ export const CategoryUploadPage: React.FC = () => {
                   )}
                   <span className="text-xs font-semibold text-slate-500">
                     {selectedItem === '__SUMMARY__'
-                      ? `Showing ${filteredOutlets.length} of ${data.outlets.length} outlets`
+                      ? `Showing ${filteredOutlets.length} of ${activeData.outlets.length} outlets`
                       : `Showing ${filteredAllOutletItems.length} rows`}
                   </span>
                 </div>
