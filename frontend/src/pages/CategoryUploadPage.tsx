@@ -39,6 +39,12 @@ export const CategoryUploadPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (datasets.length > 0 && !selectedOutlet) {
+      setSelectedOutlet('__ALL__');
+    }
+  }, [datasets.length, selectedOutlet]);
+
   // When activeCategoryIdx is -1 → merged view; else show that specific dataset
   const data = activeCategoryIdx >= 0 ? (datasets[activeCategoryIdx] || null) : null;
 

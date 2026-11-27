@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { loadPersisted, savePersisted } from '../utils/persistStorage';
 
 export interface ItemRow {
   name: string;
@@ -59,6 +60,26 @@ const UploadedDataContext = createContext<UploadedDataContextValue | undefined>(
 
 export const UploadedDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [datasets, setDatasets] = useState<UploadResult[]>([]);
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPersisted<UploadResult[]>('uploaded_datasets').then((saved) => {
+      if (!cancelled && Array.isArray(saved) && saved.length > 0) {
+        setDatasets((prev) => (prev.length === 0 ? saved : prev));
+      }
+      hydratedRef.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    savePersisted('uploaded_datasets', datasets);
+  }, [datasets]);
+
   return (
     <UploadedDataContext.Provider value={{ datasets, setDatasets }}>
       {children}

@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Upload, FileSpreadsheet, X, AlertCircle, Loader2,
   ArrowUpDown, TrendingUp, Package, Factory, Scale,
   CheckCircle2, XCircle, Info, Download, Search, ChevronDown,
 } from 'lucide-react';
 import { normalizeOutletStr, isTotalRowLabel } from '../utils/outletFuzzy';
+import { loadPersisted, savePersisted } from '../utils/persistStorage';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -187,6 +188,25 @@ function VBadge({ val, label }: { val: number; label: string }) {
 
 export const CompareDispatchPage: React.FC = () => {
   const [files, setFiles] = useState<ParsedFile[]>([]);
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPersisted<ParsedFile[]>('compare_dispatch_files').then((saved) => {
+      if (!cancelled && Array.isArray(saved) && saved.length > 0) {
+        setFiles((prev) => (prev.length === 0 ? saved : prev));
+      }
+      hydratedRef.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    savePersisted('compare_dispatch_files', files);
+  }, [files]);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const [tab, setTab] = useState<'compare' | 'dispatch' | 'detail'>('compare');
