@@ -7,7 +7,6 @@ import { MasterMergedPage } from './pages/MasterMergedPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { OutletSearchPage } from './pages/OutletSearchPage';
 import { AllOutletsPage } from './pages/AllOutletsPage';
-import { CompareDispatchPage } from './pages/CompareDispatchPage';
 import { OutletDetailPage } from './pages/OutletDetailPage';
 import { UploadPage } from './pages/UploadPage';
 import { OutletMasterPage } from './pages/OutletMasterPage';
@@ -48,8 +47,6 @@ export function App() {
         return <OutletSearchPage onSelectOutlet={handleSelectOutlet} />;
       case 'all_outlets':
         return <AllOutletsPage onSelectOutlet={handleSelectOutlet} />;
-      case 'compare_dispatch':
-        return <CompareDispatchPage />;
       case 'outlet_detail':
         return selectedOutletId ? (
           <OutletDetailPage outletId={selectedOutletId} onBack={() => setCurrentPage('all_outlets')} />

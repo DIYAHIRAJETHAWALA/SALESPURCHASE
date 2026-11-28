@@ -3,7 +3,6 @@ import {
   Search,
   FileSpreadsheet,
   TableProperties,
-  Scale,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -17,7 +16,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
     { id: 'category_upload', label: 'Excel Upload & Viewer', icon: FileSpreadsheet, highlight: true },
     { id: 'master_merged', label: 'Merged S&P Table', icon: TableProperties },
     { id: 'outlet_search', label: 'Outlet Search', icon: Search },
-    { id: 'compare_dispatch', label: 'Merge Sales & Purchase', icon: Scale },
   ];
 
   return (
