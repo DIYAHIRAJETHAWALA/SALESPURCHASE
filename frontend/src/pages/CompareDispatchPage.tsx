@@ -218,9 +218,10 @@ export const CompareDispatchPage: React.FC = () => {
   }, [files]);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<string[]>([]);
-  const [tab, setTab] = useState<'compare' | 'items' | 'detail'>('items');
+  const [tab, setTab] = useState<'compare' | 'items' | 'detail'>('compare');
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<'outlet' | 'varianceSP' | 'salesQty' | 'purchaseQty'>('varianceSP');
+  const [itemFilter, setItemFilter] = useState<'all' | 'with_purchase' | 'with_sales'>('all');
+  const [sort, setSort] = useState<'outlet' | 'varianceSP' | 'salesQty' | 'purchaseQty'>('salesQty');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [detailOutlet, setDetailOutlet] = useState<OutletSummary | null>(null);
 
@@ -420,9 +421,11 @@ export const CompareDispatchPage: React.FC = () => {
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = q
+    let list = q
       ? mergedItems.filter(r => r.outlet.toLowerCase().includes(q) || r.item.toLowerCase().includes(q))
       : mergedItems;
+    if (itemFilter === 'with_purchase') list = list.filter(r => r.purchaseQty > 0);
+    if (itemFilter === 'with_sales') list = list.filter(r => r.salesQty > 0);
     return [...list].sort((a, b) => {
       if (sort === 'outlet') {
         const cmp = a.outlet.localeCompare(b.outlet) || a.item.localeCompare(b.item);
@@ -431,7 +434,7 @@ export const CompareDispatchPage: React.FC = () => {
       const diff = (a[sort] as number) - (b[sort] as number);
       return sortDir === 'asc' ? diff : -diff;
     });
-  }, [mergedItems, search, sort, sortDir]);
+  }, [mergedItems, search, itemFilter, sort, sortDir]);
 
   const grandTotals = useMemo(() => {
     const salesQty = summary.reduce((s, o) => s + o.salesQty, 0);
@@ -626,8 +629,8 @@ export const CompareDispatchPage: React.FC = () => {
           {/* Tabs */}
           <div className="flex gap-2 border-b border-slate-200 pb-0">
             {[
-              { id: 'items', label: `🧩 All Items & Outlets Merged (${mergedItems.length})` },
               { id: 'compare', label: `📊 Outlet Summary (${totalOutlets})` },
+              { id: 'items', label: `🧩 All Items & Outlets (${mergedItems.length})` },
             ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id as any)}
                 className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${
@@ -646,6 +649,28 @@ export const CompareDispatchPage: React.FC = () => {
                   placeholder="Filter outlet or item…"
                   className="pl-9 pr-3 py-2 w-full text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:bg-white" />
               </div>
+              {tab === 'items' && (
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  {([
+                    { id: 'all', label: 'All' },
+                    { id: 'with_purchase', label: 'With Purchase' },
+                    { id: 'with_sales', label: 'With Sales' },
+                  ] as const).map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setItemFilter(f.id)}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        itemFilter === f.id
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-slate-400 font-medium shrink-0">
                 {tab === 'items'
                   ? `${filteredItems.length} of ${mergedItems.length} item rows`
