@@ -410,11 +410,22 @@ async def upload_excel(
                     qty = float(rec.quantity or 0.0)
                     amt = float(rec.amount or 0.0) or (float(rec.unit_price or 0.0) * qty)
                     if detected_report_type == "purchase":
+                        from backend.analysis.item_combo_service import PACK_CONVERSIONS
+                        norm_item = i_name.strip().upper()
+                        mult = 1.0
+                        for k, v in PACK_CONVERSIONS.items():
+                            if k.upper() == norm_item:
+                                mult = float(v.get("unit_multiplier", 1.0) or 1.0)
+                                break
                         item_entry["purchase_packs"] += qty
-                        item_entry["purchase_units"] += qty
+                        item_entry["purchase_units"] += qty * mult
                         item_entry["purchase_amount"] += amt
                     else:
-                        item_entry["individual_sales"] += qty
+                        low_item = i_name.strip().lower()
+                        if low_item.startswith("(co)") or "combo" in low_item:
+                            item_entry["combo_sales"] += qty
+                        else:
+                            item_entry["individual_sales"] += qty
                         item_entry["sales_qty"] += qty
                         item_entry["sales_amount"] += amt
 
@@ -423,6 +434,7 @@ async def upload_excel(
                     items_list = list(items_dict.values())
                     entry["items"] = items_list
                     tot_indiv = sum(it["individual_sales"] for it in items_list)
+                    tot_combo = sum(it["combo_sales"] for it in items_list)
                     tot_sales = sum(it["sales_qty"] for it in items_list)
                     tot_packs = sum(it["purchase_packs"] for it in items_list)
                     tot_units = sum(it["purchase_units"] for it in items_list)
@@ -430,7 +442,7 @@ async def upload_excel(
                     tot_purch_amt = sum(it["purchase_amount"] for it in items_list)
                     entry["summary"] = {
                         "individual_sales": tot_indiv,
-                        "combo_sales": 0.0,
+                        "combo_sales": tot_combo,
                         "total_sales_qty": tot_sales,
                         "purchase_packs": tot_packs,
                         "purchase_units": tot_units,
