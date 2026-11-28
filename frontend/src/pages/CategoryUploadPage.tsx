@@ -103,10 +103,15 @@ export const CategoryUploadPage: React.FC = () => {
       let salesAmt = 0;
       let purchAmt = 0;
       for (const it of o.items || []) {
-        const unitPrice = parseFloat(String(it.menu_ref || '').replace(/[^0-9.]/g, '')) || 0;
-        if (unitPrice > 0) {
-          salesAmt += unitPrice * (it.sales_qty || 0);
-          purchAmt += unitPrice * (it.purchase_units || 0);
+        if ((it.sales_amount ?? 0) > 0 || (it.purchase_amount ?? 0) > 0) {
+          salesAmt += it.sales_amount ?? 0;
+          purchAmt += it.purchase_amount ?? 0;
+        } else {
+          const unitPrice = parseFloat(String(it.menu_ref || '').replace(/[^0-9.]/g, '')) || 0;
+          if (unitPrice > 0) {
+            salesAmt += unitPrice * (it.sales_qty || 0);
+            purchAmt += unitPrice * (it.purchase_units || 0);
+          }
         }
       }
       map.set(o.outlet, { salesAmt, purchAmt });

@@ -11,6 +11,8 @@ export interface ItemRow {
   sales_qty: number;
   purchase_packs: number;
   purchase_units: number;
+  sales_amount?: number;
+  purchase_amount?: number;
   rmd_pct: number;
   size_breakdown: Record<string, number>;
 }
@@ -21,6 +23,8 @@ export interface OutletSummary {
   total_sales_qty: number;
   purchase_packs: number;
   purchase_units: number;
+  sales_amount?: number;
+  purchase_amount?: number;
   rmd_pct: number;
   size_breakdown: Record<string, number>;
 }

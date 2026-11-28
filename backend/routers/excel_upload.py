@@ -260,6 +260,8 @@ async def upload_excel(
                     "total_sales_qty": 0.0,
                     "purchase_packs": 0.0,
                     "purchase_units": 0.0,
+                    "sales_amount": 0.0,
+                    "purchase_amount": 0.0,
                     "rmd_pct": 0.0,
                     "size_breakdown": {},
                 },
@@ -399,17 +401,22 @@ async def upload_excel(
                             "sales_qty": 0.0,
                             "purchase_packs": 0.0,
                             "purchase_units": 0.0,
+                            "sales_amount": 0.0,
+                            "purchase_amount": 0.0,
                             "rmd_pct": 0.0,
                             "size_breakdown": {},
                         }
                     item_entry = grouped[o_name][i_name]
                     qty = float(rec.quantity or 0.0)
+                    amt = float(rec.amount or 0.0) or (float(rec.unit_price or 0.0) * qty)
                     if detected_report_type == "purchase":
                         item_entry["purchase_packs"] += qty
                         item_entry["purchase_units"] += qty
+                        item_entry["purchase_amount"] += amt
                     else:
                         item_entry["individual_sales"] += qty
                         item_entry["sales_qty"] += qty
+                        item_entry["sales_amount"] += amt
 
                 for o_name, items_dict in grouped.items():
                     entry = ensure_outlet(o_name)
@@ -419,12 +426,16 @@ async def upload_excel(
                     tot_sales = sum(it["sales_qty"] for it in items_list)
                     tot_packs = sum(it["purchase_packs"] for it in items_list)
                     tot_units = sum(it["purchase_units"] for it in items_list)
+                    tot_sales_amt = sum(it["sales_amount"] for it in items_list)
+                    tot_purch_amt = sum(it["purchase_amount"] for it in items_list)
                     entry["summary"] = {
                         "individual_sales": tot_indiv,
                         "combo_sales": 0.0,
                         "total_sales_qty": tot_sales,
                         "purchase_packs": tot_packs,
                         "purchase_units": tot_units,
+                        "sales_amount": tot_sales_amt,
+                        "purchase_amount": tot_purch_amt,
                         "rmd_pct": round((tot_sales / tot_units) * 100, 2) if tot_units > 0 else 0.0,
                         "size_breakdown": {},
                     }
