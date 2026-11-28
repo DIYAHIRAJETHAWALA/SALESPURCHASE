@@ -5,6 +5,7 @@ import {
   OutletData,
   ItemRow,
 } from '../context/UploadedDataContext';
+import { normalizeOutletStr, resolveCanonicalOutlet } from '../utils/outletFuzzy';
 import {
   UploadCloud,
   Store,
@@ -51,11 +52,13 @@ export const CategoryUploadPage: React.FC = () => {
   // ── Merged data across ALL datasets ──────────────────────────────────────
   const mergedData = useMemo(() => {
     if (datasets.length === 0) return null;
-    // Collect all outlets across all datasets, merge items by outlet key
+    // Collect all outlets across all datasets, merge items by canonical outlet key
     const outletMap = new Map<string, OutletData>();
     for (const ds of datasets) {
       for (const o of ds.outlets) {
-        const key = o.outlet.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const canonical = resolveCanonicalOutlet(o.outlet);
+        const key = normalizeOutletStr(canonical);
+        if (!key) continue;
         if (outletMap.has(key)) {
           const existing = outletMap.get(key)!;
           // Merge items
@@ -68,7 +71,7 @@ export const CategoryUploadPage: React.FC = () => {
           existing.summary.purchase_units += o.summary.purchase_units;
         } else {
           outletMap.set(key, {
-            outlet: o.outlet,
+            outlet: canonical,
             items: [...o.items],
             summary: { ...o.summary },
           });
@@ -92,6 +95,45 @@ export const CategoryUploadPage: React.FC = () => {
 
   // Active data: merged or single file
   const activeData = activeCategoryIdx === -1 ? mergedData : data;
+
+  const outletAmountMap = useMemo(() => {
+    const map = new Map<string, { salesAmt: number; purchAmt: number }>();
+    if (!activeData) return map;
+    for (const o of activeData.outlets) {
+      let salesAmt = 0;
+      let purchAmt = 0;
+      for (const it of o.items || []) {
+        const unitPrice = parseFloat(String(it.menu_ref || '').replace(/[^0-9.]/g, '')) || 0;
+        if (unitPrice > 0) {
+          salesAmt += unitPrice * (it.sales_qty || 0);
+          purchAmt += unitPrice * (it.purchase_units || 0);
+        }
+      }
+      map.set(o.outlet, { salesAmt, purchAmt });
+    }
+    return map;
+  }, [activeData]);
+
+  const mergedTotals = useMemo(() => {
+    if (!activeData) {
+      return { salesQty: 0, salesAmt: 0, purchQty: 0, purchAmt: 0, diffQty: 0, rmdPct: 0 };
+    }
+    let salesQty = 0;
+    let salesAmt = 0;
+    let purchQty = 0;
+    let purchAmt = 0;
+    for (const o of activeData.outlets) {
+      salesQty += o.summary.total_sales_qty || 0;
+      purchQty += o.summary.purchase_units || 0;
+      const amts = outletAmountMap.get(o.outlet);
+      if (amts) {
+        salesAmt += amts.salesAmt;
+        purchAmt += amts.purchAmt;
+      }
+    }
+    const rmdPct = purchQty > 0 ? Math.round((salesQty / purchQty) * 10000) / 100 : 0;
+    return { salesQty, salesAmt, purchQty, purchAmt, diffQty: salesQty - purchQty, rmdPct };
+  }, [activeData, outletAmountMap]);
 
   const handleFilesUpload = async (files: FileList | File[], sdOverride?: string, edOverride?: string, labelOverride?: string) => {
     const fileArr = Array.from(files);
@@ -272,6 +314,32 @@ export const CategoryUploadPage: React.FC = () => {
               />
             )}
           </button>
+
+          <label className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-sm cursor-pointer transition-colors">
+            <UploadCloud className="w-4 h-4" />
+            <span>{loading ? 'Processing...' : 'Upload Sales Excel'}</span>
+            <input
+              type="file"
+              accept=".xlsx,.xlsm,.xls,.csv"
+              multiple
+              onChange={onFileChange}
+              disabled={loading}
+              className="hidden"
+            />
+          </label>
+
+          <label className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-sm shadow-sm cursor-pointer transition-colors">
+            <UploadCloud className="w-4 h-4" />
+            <span>{loading ? 'Processing...' : 'Upload Purchase Excel'}</span>
+            <input
+              type="file"
+              accept=".xlsx,.xlsm,.xls,.csv"
+              multiple
+              onChange={onFileChange}
+              disabled={loading}
+              className="hidden"
+            />
+          </label>
 
           <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-sm cursor-pointer transition-colors">
             <UploadCloud className="w-4 h-4" />
@@ -577,6 +645,42 @@ export const CategoryUploadPage: React.FC = () => {
             );
           })()}
 
+          {/* Merged Totals KPI Strip */}
+          {selectedOutlet === '__ALL__' && activeData.outlets.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-[11px] font-bold uppercase text-slate-400">Total Sales Qty</p>
+                <p className="text-xl font-extrabold text-emerald-700 mt-1">{formatNum(mergedTotals.salesQty)}</p>
+              </div>
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-[11px] font-bold uppercase text-emerald-700">Sales Amount (₹)</p>
+                <p className="text-xl font-extrabold text-emerald-900 mt-1">
+                  ₹{mergedTotals.salesAmt.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-[11px] font-bold uppercase text-slate-400">Total Purchase Qty</p>
+                <p className="text-xl font-extrabold text-amber-700 mt-1">{formatNum(mergedTotals.purchQty)}</p>
+              </div>
+              <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-[11px] font-bold uppercase text-amber-700">Purchase Amount (₹)</p>
+                <p className="text-xl font-extrabold text-amber-900 mt-1">
+                  ₹{mergedTotals.purchAmt.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-[11px] font-bold uppercase text-slate-400">Total Variance (S−P)</p>
+                <p className={`text-xl font-extrabold mt-1 ${mergedTotals.diffQty >= 0 ? 'text-blue-700' : 'text-rose-700'}`}>
+                  {mergedTotals.diffQty > 0 ? '+' : ''}{formatNum(mergedTotals.diffQty)}
+                </p>
+              </div>
+              <div className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-4 shadow-sm">
+                <p className="text-[11px] font-bold uppercase text-indigo-700">Overall RMD %</p>
+                <p className="text-xl font-extrabold text-indigo-900 mt-1">{mergedTotals.rmdPct.toFixed(2)}%</p>
+              </div>
+            </div>
+          )}
+
           {/* All Outlets Table (Detailed with Item Name, or Combined Summary) */}
           {selectedOutlet === '__ALL__' && (
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -641,10 +745,10 @@ export const CategoryUploadPage: React.FC = () => {
                           </th>
                         </>
                       )}
-                      <th colSpan={3} className="py-2 px-4 text-center bg-blue-50/70 text-blue-800 border-b border-r border-slate-200">
+                      <th colSpan={4} className="py-2 px-4 text-center bg-blue-50/70 text-blue-800 border-b border-r border-slate-200">
                         Sales
                       </th>
-                      <th colSpan={2} className="py-2 px-4 text-center bg-amber-50/70 text-amber-800 border-b border-r border-slate-200">
+                      <th colSpan={3} className="py-2 px-4 text-center bg-amber-50/70 text-amber-800 border-b border-r border-slate-200">
                         Purchase
                       </th>
                       <th rowSpan={2} className="py-3 px-4 text-right align-bottom bg-slate-50">
@@ -663,9 +767,11 @@ export const CategoryUploadPage: React.FC = () => {
                         ))}
                       <th className="py-2.5 px-4 text-right whitespace-nowrap">Individual</th>
                       <th className="py-2.5 px-4 text-right whitespace-nowrap">Combo</th>
-                      <th className="py-2.5 px-4 text-right whitespace-nowrap border-r border-slate-200">Total Sales Qty</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap">Total Sales Qty</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap border-r border-slate-200">Sales Amt (₹)</th>
                       <th className="py-2.5 px-4 text-right whitespace-nowrap">Packs</th>
-                      <th className="py-2.5 px-4 text-right whitespace-nowrap border-r border-slate-200">Units (Total Qty)</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap">Units (Total Qty)</th>
+                      <th className="py-2.5 px-4 text-right whitespace-nowrap border-r border-slate-200">Purch Amt (₹)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
@@ -704,14 +810,24 @@ export const CategoryUploadPage: React.FC = () => {
                               <td className="py-3 px-4 text-right font-medium text-indigo-700">
                                 {formatNum(o.summary.combo_sales)}
                               </td>
-                              <td className="py-3 px-4 text-right font-bold text-emerald-700 border-r border-slate-100">
+                              <td className="py-3 px-4 text-right font-bold text-emerald-700">
                                 {formatNum(o.summary.total_sales_qty)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-semibold text-emerald-800 border-r border-slate-100">
+                                {outletAmountMap.get(o.outlet)?.salesAmt
+                                  ? `₹${outletAmountMap.get(o.outlet)!.salesAmt.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                                  : '—'}
                               </td>
                               <td className="py-3 px-4 text-right font-medium text-slate-700">
                                 {formatNum(o.summary.purchase_packs)}
                               </td>
-                              <td className="py-3 px-4 text-right font-bold text-amber-700 border-r border-slate-100">
+                              <td className="py-3 px-4 text-right font-bold text-amber-700">
                                 {formatNum(o.summary.purchase_units)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-semibold text-amber-800 border-r border-slate-100">
+                                {outletAmountMap.get(o.outlet)?.purchAmt
+                                  ? `₹${outletAmountMap.get(o.outlet)!.purchAmt.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                                  : '—'}
                               </td>
                               <td className="py-3 px-4 text-right font-bold text-slate-900">
                                 {o.summary.rmd_pct.toFixed(2)}%
@@ -747,14 +863,26 @@ export const CategoryUploadPage: React.FC = () => {
                             <td className="py-3 px-4 text-right font-medium text-indigo-700">
                               {formatNum(item.combo_sales)}
                             </td>
-                            <td className="py-3 px-4 text-right font-bold text-emerald-700 border-r border-slate-100">
+                            <td className="py-3 px-4 text-right font-bold text-emerald-700">
                               {formatNum(item.sales_qty)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-semibold text-emerald-800 border-r border-slate-100">
+                              {(() => {
+                                const p = parseFloat(String(item.menu_ref || '').replace(/[^0-9.]/g, '')) || 0;
+                                return p > 0 && item.sales_qty > 0 ? `₹${(p * item.sales_qty).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '—';
+                              })()}
                             </td>
                             <td className="py-3 px-4 text-right font-medium text-slate-700">
                               {formatNum(item.purchase_packs)}
                             </td>
-                            <td className="py-3 px-4 text-right font-bold text-amber-700 border-r border-slate-100">
+                            <td className="py-3 px-4 text-right font-bold text-amber-700">
                               {formatNum(item.purchase_units)}
+                            </td>
+                            <td className="py-3 px-4 text-right font-semibold text-amber-800 border-r border-slate-100">
+                              {(() => {
+                                const p = parseFloat(String(item.menu_ref || '').replace(/[^0-9.]/g, '')) || 0;
+                                return p > 0 && item.purchase_units > 0 ? `₹${(p * item.purchase_units).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '—';
+                              })()}
                             </td>
                             <td className="py-3 px-4 text-right font-bold text-slate-900">
                               {item.rmd_pct.toFixed(2)}%
@@ -762,6 +890,42 @@ export const CategoryUploadPage: React.FC = () => {
                           </tr>
                         ))}
                   </tbody>
+                  {selectedItem === '__SUMMARY__' && filteredOutlets.length > 0 && (
+                    <tfoot className="bg-slate-900 text-white font-bold text-xs">
+                      <tr>
+                        <td
+                          colSpan={1 + uniqueItemNames.length}
+                          className="py-3 px-4 sticky left-0 bg-slate-900 border-r border-slate-700"
+                        >
+                          Grand Total ({filteredOutlets.length} outlets)
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono">
+                          {formatNum(filteredOutlets.reduce((s, o) => s + o.summary.individual_sales, 0))}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-indigo-300">
+                          {formatNum(filteredOutlets.reduce((s, o) => s + o.summary.combo_sales, 0))}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-emerald-300">
+                          {formatNum(mergedTotals.salesQty)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-emerald-200 border-r border-slate-700">
+                          {mergedTotals.salesAmt > 0 ? `₹${mergedTotals.salesAmt.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono">
+                          {formatNum(filteredOutlets.reduce((s, o) => s + o.summary.purchase_packs, 0))}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-amber-300">
+                          {formatNum(mergedTotals.purchQty)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-amber-200 border-r border-slate-700">
+                          {mergedTotals.purchAmt > 0 ? `₹${mergedTotals.purchAmt.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-indigo-300">
+                          {mergedTotals.rmdPct.toFixed(2)}%
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>
