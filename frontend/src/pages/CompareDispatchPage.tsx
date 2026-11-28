@@ -4,7 +4,7 @@ import {
   ArrowUpDown, Scale,
   CheckCircle2, XCircle, Info, Download, Search, Trash2, Merge,
 } from 'lucide-react';
-import { normalizeOutletStr, isTotalRowLabel } from '../utils/outletFuzzy';
+import { normalizeOutletStr, isTotalRowLabel, resolveCanonicalOutlet } from '../utils/outletFuzzy';
 import { loadPersisted, savePersisted } from '../utils/persistStorage';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -336,10 +336,11 @@ export const CompareDispatchPage: React.FC = () => {
 
     const accum = (role: 'sales' | 'purchase' | 'dispatch', rows: RowData[]) => {
       for (const row of rows) {
-        const key = normalizeOutletStr(row.outlet);
+        const canonical = resolveCanonicalOutlet(row.outlet);
+        const key = normalizeOutletStr(canonical);
         if (!key) continue;
         const existing = map.get(key) || {
-          outlet: row.outlet,
+          outlet: canonical,
           salesQty: 0, salesAmt: 0,
           purchaseQty: 0, purchaseAmt: 0,
           dispatchQty: 0, dispatchPacks: 0,
@@ -381,14 +382,15 @@ export const CompareDispatchPage: React.FC = () => {
     for (const f of files) {
       if (f.role !== 'sales' && f.role !== 'purchase') continue;
       for (const row of f.rows) {
-        const outKey = normalizeOutletStr(row.outlet);
+        const canonical = resolveCanonicalOutlet(row.outlet);
+        const outKey = normalizeOutletStr(canonical);
         if (!outKey) continue;
         const itemLabel = row.item && row.item !== '_OUTLET_TOTAL_' ? row.item : 'Outlet Total';
         const itemKey = normItem(itemLabel);
         const key = `${outKey}::${itemKey}`;
 
         const existing = map.get(key) || {
-          outlet: row.outlet,
+          outlet: canonical,
           item: itemLabel,
           salesQty: 0,
           salesAmt: 0,
@@ -813,7 +815,7 @@ export const CompareDispatchPage: React.FC = () => {
                   {/* Raw items from each file */}
                   {files.map(f => {
                     const outletKey = normalizeOutletStr(detailOutlet.outlet);
-                    const rows = f.rows.filter(r => normalizeOutletStr(r.outlet) === outletKey && r.item && r.item !== '_OUTLET_TOTAL_');
+                    const rows = f.rows.filter(r => normalizeOutletStr(resolveCanonicalOutlet(r.outlet)) === outletKey && r.item && r.item !== '_OUTLET_TOTAL_');
                     if (rows.length === 0) return null;
                     const roleColor = f.role === 'sales' ? 'emerald' : f.role === 'purchase' ? 'blue' : 'violet';
                     return (

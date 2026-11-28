@@ -6,7 +6,7 @@ import {
 import { fetchMasterMergedTable, fetchOutletsList } from '../api';
 import { MasterMergedRow, MasterMergedResponse, Outlet } from '../types';
 import { useUploadedData, UploadResult } from '../context/UploadedDataContext';
-import { fuzzyOutletScore, isTotalRowLabel, normalizeOutletStr } from '../utils/outletFuzzy';
+import { fuzzyOutletScore, isTotalRowLabel, normalizeOutletStr, resolveCanonicalOutlet } from '../utils/outletFuzzy';
 import { RecipeModal } from '../components/RecipeModal';
 import { DEFAULT_OUTLETS } from '../utils/defaultOutlets';
 import {
@@ -104,21 +104,22 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
             for (const it of o.items) {
               const sq = it.sales_qty ?? 0;
               const pq = it.purchase_units ?? 0;
+              const unitPrice = parseFloat(String(it.menu_ref || '').replace(/[^0-9.]/g, '')) || 0;
               const status: 'both' | 'sold_only' | 'purchased_only' =
                 sq > 0 && pq > 0 ? 'both' : sq > 0 ? 'sold_only' : 'purchased_only';
               rows.push({
                 outlet_id: nextId--,
-                outlet_name: o.outlet,
+                outlet_name: resolveCanonicalOutlet(o.outlet),
                 outlet_code: ds.category || undefined,
                 item_id: nextId--,
                 item_name: it.name,
                 item_code: it.size || undefined,
                 purchase_qty: pq,
-                purchase_amount: 0,
+                purchase_amount: unitPrice * pq,
                 sales_qty: sq,
-                sales_amount: 0,
+                sales_amount: unitPrice * sq,
                 diff_qty: sq - pq,
-                diff_amount: 0,
+                diff_amount: unitPrice * (sq - pq),
                 status,
               });
             }

@@ -1,4 +1,5 @@
 import { UploadResult } from '../context/UploadedDataContext';
+import { DEFAULT_OUTLETS } from './defaultOutlets';
 
 export function normalizeOutletStr(s: string): string {
   return s
@@ -6,6 +7,36 @@ export function normalizeOutletStr(s: string): string {
     .replace(/[\-().,_/\\]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+const OUTLET_ALIAS_MAP: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const o of DEFAULT_OUTLETS) {
+    m.set(normalizeOutletStr(o.official_name), o.official_name);
+    for (const a of o.aliases || []) {
+      m.set(normalizeOutletStr(a), o.official_name);
+      const stripped = normalizeOutletStr(a.replace(/\b(out|mf)\s*[-_]?\s*\d+\b/gi, ''));
+      if (stripped && !m.has(stripped)) {
+        m.set(stripped, o.official_name);
+      }
+    }
+    if (o.city) {
+      const cityKey = normalizeOutletStr(o.city);
+      if (cityKey && !m.has(cityKey)) {
+        m.set(cityKey, o.official_name);
+      }
+    }
+  }
+  return m;
+})();
+
+export function resolveCanonicalOutlet(raw: string): string {
+  if (!raw) return '';
+  const norm = normalizeOutletStr(raw);
+  if (OUTLET_ALIAS_MAP.has(norm)) return OUTLET_ALIAS_MAP.get(norm)!;
+  const stripped = normalizeOutletStr(raw.replace(/\b(out|mf)\s*[-_]?\s*\d+\b/gi, ''));
+  if (stripped && OUTLET_ALIAS_MAP.has(stripped)) return OUTLET_ALIAS_MAP.get(stripped)!;
+  return raw.replace(/\s+/g, ' ').trim();
 }
 
 function levenshtein(a: string, b: string): number {
