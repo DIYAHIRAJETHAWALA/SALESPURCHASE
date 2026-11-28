@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   FileSpreadsheet, Search, ArrowUpDown, Filter,
-  Store, Upload, Utensils
+  Store, Upload, Utensils, Trash2
 } from 'lucide-react';
 import { fetchMasterMergedTable, fetchOutletsList } from '../api';
 import { MasterMergedRow, MasterMergedResponse, Outlet } from '../types';
@@ -42,6 +42,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
   const [recipeCategory, setRecipeCategory] = useState<string>('All');
   const [recipeSearch, setRecipeSearch] = useState<string>('');
   const [recipeOutlet, setRecipeOutlet] = useState<string>('');
+  const [hideDbTotals, setHideDbTotals] = useState<boolean>(false);
   const [modalRecipe, setModalRecipe] = useState<{
     recipe: RecipeBomItem | null;
     clickedItemName?: string;
@@ -183,23 +184,69 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     return rows;
   }, [datasets]);
 
-  const useExcelFallback = (!dbData || dbData.total === 0) && excelRows.length > 0;
+  const hasUploadedExcel = excelRows.length > 0;
+  const useExcelFallback = hasUploadedExcel || hideDbTotals;
 
   // Unique outlets list for dropdown
   const outletOptions = useMemo<string[]>(() => {
     const seen = new Map<string, string>();
+    if (hasUploadedExcel) {
+      for (const r of excelRows) {
+        const k = normalizeOutletStr(r.outlet_name);
+        if (k && !seen.has(k)) seen.set(k, r.outlet_name);
+      }
+      return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+    }
+    if (hideDbTotals) return [];
     for (const o of dbOutlets) {
       seen.set(normalizeOutletStr(o.official_name), o.official_name);
     }
-    for (const r of excelRows) {
-      const k = normalizeOutletStr(r.outlet_name);
-      if (k && !seen.has(k)) seen.set(k, r.outlet_name);
-    }
     return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
-  }, [dbOutlets, excelRows]);
+  }, [dbOutlets, excelRows, hasUploadedExcel, hideDbTotals]);
+
+  const uploadedBomDataset = useMemo(
+    () => [...datasets].reverse().find((d) => d.mode === 'recipe_bom' && d.recipe_bom && d.recipe_bom.length > 0),
+    [datasets]
+  );
+
+  const bomItems = useMemo<RecipeBomItem[]>(() => {
+    if (uploadedBomDataset?.recipe_bom?.length) return uploadedBomDataset.recipe_bom;
+    if (dbRecipeBom.length > 0) return dbRecipeBom;
+    return hideDbTotals ? [] : DEFAULT_RECIPE_BOM;
+  }, [uploadedBomDataset, dbRecipeBom, hideDbTotals]);
 
   const data = useMemo<MasterMergedResponse | null>(() => {
     if (!useExcelFallback) return dbData;
+
+    if (excelRows.length === 0) {
+      if (uploadedBomDataset?.recipe_bom?.length) {
+        const items = uploadedBomDataset.recipe_bom;
+        const totSale = items.reduce((s, r) => s + (r.sale_price || 0), 0);
+        const totMaking = items.reduce((s, r) => s + (r.making_cost || 0), 0);
+        return {
+          total: items.length,
+          page: 1,
+          limit: pageSize,
+          total_sales_amount: totSale,
+          total_purchase_amount: totMaking,
+          total_variance_amount: totSale - totMaking,
+          total_sales_qty: items.length,
+          total_purchase_qty: items.length,
+          rows: [],
+        };
+      }
+      return {
+        total: 0,
+        page: 1,
+        limit: pageSize,
+        total_sales_amount: 0,
+        total_purchase_amount: 0,
+        total_variance_amount: 0,
+        total_sales_qty: 0,
+        total_purchase_qty: 0,
+        rows: [],
+      };
+    }
 
     let filtered = excelRows;
     if (selectedOutletName) {
@@ -274,6 +321,7 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
         if (res.ok) uploaded.push(await res.json());
       }
       if (uploaded.length > 0) {
+        setHideDbTotals(false);
         const bomUpload = [...uploaded].reverse().find((u) => u.mode === 'recipe_bom' && u.recipe_bom?.length);
         if (bomUpload && bomUpload.recipe_bom) {
           setDbRecipeBom(bomUpload.recipe_bom);
@@ -294,6 +342,17 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
     }
   };
 
+  const handleClearAllExcels = () => {
+    setDatasets([]);
+    setDbRecipeBom([]);
+    setDbRecipeBomFile('');
+    setHideDbTotals(true);
+    setRecipeOutlet('');
+    setRecipeSearch('');
+    setRecipeCategory('All');
+    setPage(1);
+  };
+
   const handleExportExcel = () => {
     const params = new URLSearchParams();
     const matchedDbOutlet = dbOutlets.find((o) => o.official_name === selectedOutletName);
@@ -310,17 +369,6 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
   };
 
   const totalPages = data ? Math.ceil(data.total / pageSize) || 1 : 1;
-
-  const uploadedBomDataset = useMemo(
-    () => [...datasets].reverse().find((d) => d.mode === 'recipe_bom' && d.recipe_bom && d.recipe_bom.length > 0),
-    [datasets]
-  );
-
-  const bomItems = useMemo<RecipeBomItem[]>(() => {
-    if (uploadedBomDataset?.recipe_bom?.length) return uploadedBomDataset.recipe_bom;
-    if (dbRecipeBom.length > 0) return dbRecipeBom;
-    return DEFAULT_RECIPE_BOM;
-  }, [uploadedBomDataset, dbRecipeBom]);
 
   const bomSourceFilename = uploadedBomDataset?.filename || dbRecipeBomFile || '';
 
@@ -445,6 +493,15 @@ export const MasterMergedPage: React.FC<MasterMergedPageProps> = ({ onSelectOutl
               onChange={handleQuickUpload}
             />
           </label>
+          <button
+            type="button"
+            onClick={handleClearAllExcels}
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold flex items-center space-x-2 shadow-md transition-all"
+            title="Clear all uploaded Excel files and reset totals"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Clear All Excels</span>
+          </button>
           <button
             onClick={handleExportExcel}
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center space-x-2 shadow-md transition-all"

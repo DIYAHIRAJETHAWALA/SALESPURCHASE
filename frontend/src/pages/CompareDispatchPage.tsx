@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Upload, FileSpreadsheet, X, AlertCircle, Loader2,
-  ArrowUpDown, TrendingUp, Package, Factory, Scale,
-  CheckCircle2, XCircle, Info, Download, Search, ChevronDown,
+  ArrowUpDown, Scale,
+  CheckCircle2, XCircle, Info, Download, Search, Trash2, Merge,
 } from 'lucide-react';
 import { normalizeOutletStr, isTotalRowLabel } from '../utils/outletFuzzy';
 import { loadPersisted, savePersisted } from '../utils/persistStorage';
@@ -40,7 +40,16 @@ interface OutletSummary {
   rmdPct: number;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+interface MergedItemRow {
+  outlet: string;
+  item: string;
+  salesQty: number;
+  salesAmt: number;
+  purchaseQty: number;
+  purchaseAmt: number;
+  varianceSP: number;
+  rmdPct: number;
+}
 
 function parseNumber(v: unknown): number {
   if (v === null || v === undefined || v === '') return 0;
@@ -209,9 +218,9 @@ export const CompareDispatchPage: React.FC = () => {
   }, [files]);
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<string[]>([]);
-  const [tab, setTab] = useState<'compare' | 'dispatch' | 'detail'>('compare');
+  const [tab, setTab] = useState<'compare' | 'items' | 'detail'>('items');
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<'outlet' | 'varianceSP' | 'varianceDP' | 'salesQty' | 'purchaseQty' | 'dispatchQty'>('varianceSP');
+  const [sort, setSort] = useState<'outlet' | 'varianceSP' | 'salesQty' | 'purchaseQty'>('varianceSP');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [detailOutlet, setDetailOutlet] = useState<OutletSummary | null>(null);
 
@@ -306,6 +315,12 @@ export const CompareDispatchPage: React.FC = () => {
   };
 
   const removeFile = (name: string) => setFiles(prev => prev.filter(f => f.filename !== name));
+  const clearAllFiles = () => {
+    setFiles([]);
+    setErrors([]);
+    setDetailOutlet(null);
+    setSearch('');
+  };
 
   // ── Outlet Summary Computation ──────────────────────────────────────────────
   const summary = useMemo<OutletSummary[]>(() => {
@@ -347,9 +362,76 @@ export const CompareDispatchPage: React.FC = () => {
     }));
   }, [files]);
 
-  const hasDispatch = files.some(f => f.role === 'dispatch');
   const hasSales = files.some(f => f.role === 'sales');
   const hasPurchase = files.some(f => f.role === 'purchase');
+
+  // ── Item-level Merged Sales & Purchase across all outlets ──────────────────
+  const mergedItems = useMemo<MergedItemRow[]>(() => {
+    const map = new Map<string, MergedItemRow>();
+    const normItem = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+    for (const f of files) {
+      if (f.role !== 'sales' && f.role !== 'purchase') continue;
+      for (const row of f.rows) {
+        const outKey = normalizeOutletStr(row.outlet);
+        if (!outKey) continue;
+        const itemLabel = row.item && row.item !== '_OUTLET_TOTAL_' ? row.item : 'Outlet Total';
+        const itemKey = normItem(itemLabel);
+        const key = `${outKey}::${itemKey}`;
+
+        const existing = map.get(key) || {
+          outlet: row.outlet,
+          item: itemLabel,
+          salesQty: 0,
+          salesAmt: 0,
+          purchaseQty: 0,
+          purchaseAmt: 0,
+          varianceSP: 0,
+          rmdPct: 0,
+        };
+
+        if (f.role === 'sales') {
+          existing.salesQty += row.qty;
+          existing.salesAmt += row.amount;
+        } else {
+          existing.purchaseQty += row.qty;
+          existing.purchaseAmt += row.amount;
+        }
+        map.set(key, existing);
+      }
+    }
+
+    return Array.from(map.values()).map(r => ({
+      ...r,
+      varianceSP: r.salesQty - r.purchaseQty,
+      rmdPct: r.purchaseQty > 0 ? Math.round((r.salesQty / r.purchaseQty) * 10000) / 100 : 0,
+    }));
+  }, [files]);
+
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = q
+      ? mergedItems.filter(r => r.outlet.toLowerCase().includes(q) || r.item.toLowerCase().includes(q))
+      : mergedItems;
+    return [...list].sort((a, b) => {
+      if (sort === 'outlet') {
+        const cmp = a.outlet.localeCompare(b.outlet) || a.item.localeCompare(b.item);
+        return sortDir === 'asc' ? cmp : -cmp;
+      }
+      const diff = (a[sort] as number) - (b[sort] as number);
+      return sortDir === 'asc' ? diff : -diff;
+    });
+  }, [mergedItems, search, sort, sortDir]);
+
+  const grandTotals = useMemo(() => {
+    const salesQty = summary.reduce((s, o) => s + o.salesQty, 0);
+    const salesAmt = summary.reduce((s, o) => s + o.salesAmt, 0);
+    const purchaseQty = summary.reduce((s, o) => s + o.purchaseQty, 0);
+    const purchaseAmt = summary.reduce((s, o) => s + o.purchaseAmt, 0);
+    const varianceSP = salesQty - purchaseQty;
+    const rmdPct = purchaseQty > 0 ? Math.round((salesQty / purchaseQty) * 10000) / 100 : 0;
+    return { salesQty, salesAmt, purchaseQty, purchaseAmt, varianceSP, rmdPct };
+  }, [summary]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -373,17 +455,28 @@ export const CompareDispatchPage: React.FC = () => {
 
   // Export CSV
   const exportCsv = () => {
-    const headers = ['Outlet', 'Sales Qty', 'Sales Amt', 'Purchase Qty', 'Purchase Amt',
-      'Dispatch Qty', 'Dispatch Packs', 'Variance (S-P)', 'Variance (D-P)', 'RMD%'];
+    if (tab === 'items') {
+      const headers = ['Outlet', 'Item Name', 'Sales Qty', 'Sales Amt', 'Purchase Qty', 'Purchase Amt', 'Total / Variance (S-P)', 'RMD %'];
+      const rows = filteredItems.map(r => [
+        r.outlet, r.item, r.salesQty, r.salesAmt, r.purchaseQty, r.purchaseAmt, r.varianceSP, r.rmdPct,
+      ]);
+      const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = `merged_items_outlets_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+      return;
+    }
+    const headers = ['Outlet', 'Sales Qty', 'Sales Amt', 'Purchase Qty', 'Purchase Amt', 'Variance (S-P)', 'RMD %'];
     const rows = filtered.map(o => [
-      o.outlet, o.salesQty, o.salesAmt, o.purchaseQty, o.purchaseAmt,
-      o.dispatchQty, o.dispatchPacks, o.varianceSP, o.varianceDP, o.rmdPct,
+      o.outlet, o.salesQty, o.salesAmt, o.purchaseQty, o.purchaseAmt, o.varianceSP, o.rmdPct,
     ]);
     const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
-    a.download = `compare_dispatch_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `merged_outlets_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click(); URL.revokeObjectURL(url);
   };
 
@@ -391,37 +484,69 @@ export const CompareDispatchPage: React.FC = () => {
     <div className="p-6 max-w-7xl mx-auto space-y-6">
 
       {/* ── Header ── */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3 mb-1">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg">
               <Scale className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-extrabold text-slate-900">Compare & Dispatch</h1>
-              <p className="text-slate-500 text-sm">Upload Sales, Purchase & Factory Dispatch Excels — compare per outlet</p>
+              <h1 className="text-2xl font-extrabold text-slate-900">Merge Sales &amp; Purchase</h1>
+              <p className="text-slate-500 text-sm">Upload separate Sales Excel &amp; Purchase Excel — merge all outlets &amp; items in 1 click with Total &amp; RMD %</p>
             </div>
           </div>
         </div>
-        {totalOutlets > 0 && (
-          <button onClick={exportCsv} className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-xs font-semibold rounded-xl hover:bg-slate-700 transition-colors">
-            <Download className="w-4 h-4" /> Export CSV
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {files.length > 0 && (
+            <button
+              type="button"
+              onClick={clearAllFiles}
+              className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white text-xs font-semibold rounded-xl hover:bg-rose-700 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" /> Clear All Excels
+            </button>
+          )}
+          {totalOutlets > 0 && (
+            <button onClick={exportCsv} className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-xs font-semibold rounded-xl hover:bg-slate-700 transition-colors">
+              <Download className="w-4 h-4" /> Export CSV
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Upload Row ── */}
-      <div className={`grid gap-4 ${hasDispatch || files.length === 0 ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-2'}`}>
+      {/* ── Upload Row (2 separate boxes: Sales & Purchase) ── */}
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
         <UploadZone label="📈 Sales Excel" role="sales" color="emerald"
           onFile={fs => handleUpload(fs, 'sales')} files={files}
           onRemove={removeFile} loading={!!loading.sales} />
         <UploadZone label="📦 Purchase Excel" role="purchase" color="blue"
           onFile={fs => handleUpload(fs, 'purchase')} files={files}
           onRemove={removeFile} loading={!!loading.purchase} />
-        <UploadZone label="🏭 Factory Dispatch Excel" role="dispatch" color="violet"
-          onFile={fs => handleUpload(fs, 'dispatch')} files={files}
-          onRemove={removeFile} loading={!!loading.dispatch} />
       </div>
+
+      {/* ── 1-Click Merge Action Bar ── */}
+      {(hasSales || hasPurchase) && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-indigo-50/70 border border-indigo-200 rounded-xl px-4 py-3">
+          <div className="text-xs text-indigo-900 font-medium">
+            {hasSales && hasPurchase
+              ? `Ready: ${mergedItems.length.toLocaleString()} item-outlet rows merged across ${totalOutlets} outlets.`
+              : hasSales
+              ? 'Sales Excel loaded. Upload Purchase Excel to merge both, or click Merge to inspect Sales.'
+              : 'Purchase Excel loaded. Upload Sales Excel to merge both, or click Merge to inspect Purchase.'}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setTab('items');
+              document.getElementById('merged-sp-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-md transition-all shrink-0"
+          >
+            <Merge className="w-4 h-4" />
+            <span>Merge Sales &amp; Purchase (1-Click)</span>
+          </button>
+        </div>
+      )}
 
       {/* ── Errors & Warnings ── */}
       {errors.map((e, i) => (
@@ -441,16 +566,15 @@ export const CompareDispatchPage: React.FC = () => {
       {totalOutlets === 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center shadow-sm">
           <Scale className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-          <h2 className="font-bold text-slate-700 text-lg mb-2">Upload Excels to Compare</h2>
+          <h2 className="font-bold text-slate-700 text-lg mb-2">Upload Sales &amp; Purchase Excels to Merge</h2>
           <p className="text-slate-400 text-sm max-w-md mx-auto mb-6">
-            Drop your Sales Excel, Purchase Excel, and optionally your Factory Dispatch Excel above.
-            The app will auto-match outlets across all files and show the full comparison.
+            Drop your separate Sales Excel and Purchase Excel above.
+            The app will merge all outlets &amp; items in 1 click with Totals and RMD %.
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl mx-auto text-xs text-left">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto text-xs text-left">
             {[
               { icon: '📈', title: 'Sales Excel', desc: 'Any outlet report with item-wise sales quantities' },
               { icon: '📦', title: 'Purchase Excel', desc: 'Purchase orders or stock received per outlet' },
-              { icon: '🏭', title: 'Factory Dispatch', desc: 'What was dispatched from factory to each outlet' },
             ].map(c => (
               <div key={c.title} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="text-2xl mb-1">{c.icon}</div>
@@ -466,38 +590,34 @@ export const CompareDispatchPage: React.FC = () => {
       {totalOutlets > 0 && (
         <>
           {/* Stats strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div id="merged-sp-results" className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
               <p className="text-xs text-slate-500 font-medium">Outlets Detected</p>
               <p className="text-2xl font-extrabold text-slate-900">{totalOutlets}</p>
             </div>
             <div className="bg-emerald-50 rounded-xl border border-emerald-100 p-4 shadow-sm">
               <p className="text-xs text-emerald-700 font-medium">Total Sales Qty</p>
-              <p className="text-2xl font-extrabold text-emerald-800">{summary.reduce((s, o) => s + o.salesQty, 0).toLocaleString()}</p>
+              <p className="text-2xl font-extrabold text-emerald-800">{grandTotals.salesQty.toLocaleString()}</p>
             </div>
             <div className="bg-blue-50 rounded-xl border border-blue-100 p-4 shadow-sm">
               <p className="text-xs text-blue-700 font-medium">Total Purchase Qty</p>
-              <p className="text-2xl font-extrabold text-blue-800">{summary.reduce((s, o) => s + o.purchaseQty, 0).toLocaleString()}</p>
+              <p className="text-2xl font-extrabold text-blue-800">{grandTotals.purchaseQty.toLocaleString()}</p>
             </div>
-            {hasDispatch && (
-              <div className="bg-violet-50 rounded-xl border border-violet-100 p-4 shadow-sm">
-                <p className="text-xs text-violet-700 font-medium">Total Dispatched</p>
-                <p className="text-2xl font-extrabold text-violet-800">{summary.reduce((s, o) => s + o.dispatchQty, 0).toLocaleString()}</p>
-              </div>
-            )}
-            {!hasDispatch && (
-              <div className="bg-rose-50 rounded-xl border border-rose-100 p-4 shadow-sm">
-                <p className="text-xs text-rose-700 font-medium">S−P Variance</p>
-                <p className="text-2xl font-extrabold text-rose-800">{summary.reduce((s, o) => s + o.varianceSP, 0).toLocaleString()}</p>
-              </div>
-            )}
+            <div className="bg-rose-50 rounded-xl border border-rose-100 p-4 shadow-sm">
+              <p className="text-xs text-rose-700 font-medium">S−P Variance</p>
+              <p className="text-2xl font-extrabold text-rose-800">{grandTotals.varianceSP.toLocaleString()}</p>
+            </div>
+            <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-4 shadow-sm">
+              <p className="text-xs text-indigo-700 font-medium">Overall RMD %</p>
+              <p className="text-2xl font-extrabold text-indigo-800">{grandTotals.rmdPct.toFixed(1)}%</p>
+            </div>
           </div>
 
           {/* Tabs */}
           <div className="flex gap-2 border-b border-slate-200 pb-0">
             {[
-              { id: 'compare', label: '📊 Sales vs Purchase' },
-              ...(hasDispatch ? [{ id: 'dispatch', label: '🏭 Dispatch Tracking' }] : []),
+              { id: 'items', label: `🧩 All Items & Outlets Merged (${mergedItems.length})` },
+              { id: 'compare', label: `📊 Outlet Summary (${totalOutlets})` },
             ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id as any)}
                 className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${
@@ -513,13 +633,70 @@ export const CompareDispatchPage: React.FC = () => {
               <div className="relative w-full sm:w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Filter outlets…"
+                  placeholder="Filter outlet or item…"
                   className="pl-9 pr-3 py-2 w-full text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:bg-white" />
               </div>
-              <p className="text-xs text-slate-400 font-medium shrink-0">{filtered.length} of {totalOutlets} outlets</p>
+              <p className="text-xs text-slate-400 font-medium shrink-0">
+                {tab === 'items'
+                  ? `${filteredItems.length} of ${mergedItems.length} item rows`
+                  : `${filtered.length} of ${totalOutlets} outlets`}
+              </p>
             </div>
 
             <div className="overflow-x-auto max-h-[550px] overflow-y-auto">
+              {tab === 'items' && (
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold sticky top-0 z-10">
+                    <tr>
+                      <th className="py-3 px-4 cursor-pointer hover:bg-slate-100" onClick={() => toggleSort('outlet')}>
+                        <span className="flex items-center gap-1">Outlet <ArrowUpDown className="w-3 h-3" /></span>
+                      </th>
+                      <th className="py-3 px-4">Item Name</th>
+                      <th className="py-3 px-4 text-right cursor-pointer hover:bg-slate-100 text-emerald-700" onClick={() => toggleSort('salesQty')}>
+                        <span className="flex items-center justify-end gap-1">Sales Qty <ArrowUpDown className="w-3 h-3" /></span>
+                      </th>
+                      <th className="py-3 px-4 text-right text-emerald-600">Sales Amt</th>
+                      <th className="py-3 px-4 text-right cursor-pointer hover:bg-slate-100 text-blue-700" onClick={() => toggleSort('purchaseQty')}>
+                        <span className="flex items-center justify-end gap-1">Purch Qty <ArrowUpDown className="w-3 h-3" /></span>
+                      </th>
+                      <th className="py-3 px-4 text-right text-blue-600">Purch Amt</th>
+                      <th className="py-3 px-4 text-right cursor-pointer hover:bg-slate-100" onClick={() => toggleSort('varianceSP')}>
+                        <span className="flex items-center justify-end gap-1">Total Var (S−P) <ArrowUpDown className="w-3 h-3" /></span>
+                      </th>
+                      <th className="py-3 px-4 text-right">RMD %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {filteredItems.map((r, idx) => (
+                      <tr key={`${r.outlet}-${r.item}-${idx}`} className="hover:bg-indigo-50/30 transition-colors">
+                        <td className="py-2.5 px-4 font-semibold text-slate-800 max-w-[200px] truncate">{r.outlet}</td>
+                        <td className="py-2.5 px-4 font-medium text-slate-700">{r.item}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-emerald-700 font-semibold">{r.salesQty.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-emerald-600">{r.salesAmt > 0 ? r.salesAmt.toLocaleString() : '—'}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-blue-700 font-semibold">{r.purchaseQty.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-blue-600">{r.purchaseAmt > 0 ? r.purchaseAmt.toLocaleString() : '—'}</td>
+                        <td className="py-2.5 px-4 text-right">
+                          <span className={`font-bold font-mono ${r.varianceSP > 0 ? 'text-emerald-700' : r.varianceSP < 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                            {r.varianceSP > 0 ? '+' : ''}{r.varianceSP.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-indigo-700">{r.rmdPct > 0 ? `${r.rmdPct.toFixed(1)}%` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="sticky bottom-0 bg-slate-900 text-white font-bold z-10 text-xs">
+                    <tr>
+                      <td className="py-3 px-4" colSpan={2}>Grand Total ({filteredItems.length} rows)</td>
+                      <td className="py-3 px-4 text-right font-mono text-emerald-300">{grandTotals.salesQty.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono text-emerald-200">{grandTotals.salesAmt > 0 ? grandTotals.salesAmt.toLocaleString() : '—'}</td>
+                      <td className="py-3 px-4 text-right font-mono text-blue-300">{grandTotals.purchaseQty.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono text-blue-200">{grandTotals.purchaseAmt > 0 ? grandTotals.purchaseAmt.toLocaleString() : '—'}</td>
+                      <td className="py-3 px-4 text-right font-mono">{grandTotals.varianceSP > 0 ? '+' : ''}{grandTotals.varianceSP.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono text-indigo-300">{grandTotals.rmdPct.toFixed(1)}%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
               {tab === 'compare' && (
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-50 text-slate-600 font-semibold sticky top-0 z-10">
@@ -571,63 +748,18 @@ export const CompareDispatchPage: React.FC = () => {
                       );
                     })}
                   </tbody>
-                </table>
-              )}
-
-              {tab === 'dispatch' && hasDispatch && (
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-50 text-slate-600 font-semibold sticky top-0 z-10">
+                  <tfoot className="sticky bottom-0 bg-slate-900 text-white font-bold z-10 text-xs">
                     <tr>
-                      <th className="py-3 px-4">Outlet</th>
-                      <th className="py-3 px-4 text-right text-violet-700 cursor-pointer hover:bg-slate-100" onClick={() => toggleSort('dispatchQty')}>
-                        <span className="flex items-center justify-end gap-1">Dispatched <ArrowUpDown className="w-3 h-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 text-right text-violet-600">Dispatch Packs</th>
-                      <th className="py-3 px-4 text-right text-blue-700 cursor-pointer hover:bg-slate-100" onClick={() => toggleSort('purchaseQty')}>
-                        <span className="flex items-center justify-end gap-1">Purchased <ArrowUpDown className="w-3 h-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 text-right text-emerald-700 cursor-pointer hover:bg-slate-100" onClick={() => toggleSort('salesQty')}>
-                        <span className="flex items-center justify-end gap-1">Sold <ArrowUpDown className="w-3 h-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 text-right cursor-pointer hover:bg-slate-100" onClick={() => toggleSort('varianceDP')}>
-                        <span className="flex items-center justify-end gap-1">D−P Var <ArrowUpDown className="w-3 h-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 text-right">D−Sold Var</th>
-                      <th className="py-3 px-4 text-right">Status</th>
+                      <td className="py-3 px-4">Grand Total ({filtered.length} outlets)</td>
+                      <td className="py-3 px-4 text-right font-mono text-emerald-300">{grandTotals.salesQty.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono text-emerald-200">{grandTotals.salesAmt > 0 ? grandTotals.salesAmt.toLocaleString() : '—'}</td>
+                      <td className="py-3 px-4 text-right font-mono text-blue-300">{grandTotals.purchaseQty.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono text-blue-200">{grandTotals.purchaseAmt > 0 ? grandTotals.purchaseAmt.toLocaleString() : '—'}</td>
+                      <td className="py-3 px-4 text-right font-mono">{grandTotals.varianceSP > 0 ? '+' : ''}{grandTotals.varianceSP.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono text-indigo-300">{grandTotals.rmdPct.toFixed(1)}%</td>
+                      <td className="py-3 px-4 text-right">—</td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {filtered.map((o, i) => {
-                      const dispOk = Math.abs(o.varianceDP) <= 5;
-                      return (
-                        <tr key={o.outlet + i}
-                          onClick={() => { setDetailOutlet(o); setTab('detail'); }}
-                          className="cursor-pointer hover:bg-violet-50/30 transition-colors">
-                          <td className="py-3 px-4 font-semibold text-slate-800 max-w-[200px] truncate">{o.outlet}</td>
-                          <td className="py-3 px-4 text-right font-mono text-violet-700 font-semibold">{o.dispatchQty.toLocaleString()}</td>
-                          <td className="py-3 px-4 text-right font-mono text-violet-600">{o.dispatchPacks > 0 ? o.dispatchPacks.toLocaleString() : '—'}</td>
-                          <td className="py-3 px-4 text-right font-mono text-blue-700 font-semibold">{o.purchaseQty.toLocaleString()}</td>
-                          <td className="py-3 px-4 text-right font-mono text-emerald-700 font-semibold">{o.salesQty.toLocaleString()}</td>
-                          <td className="py-3 px-4 text-right">
-                            <span className={`font-bold font-mono ${o.varianceDP > 10 ? 'text-red-600' : o.varianceDP < -10 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                              {o.varianceDP > 0 ? '+' : ''}{o.varianceDP.toLocaleString()}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <span className={`font-bold font-mono ${o.varianceDS > 10 ? 'text-red-600' : o.varianceDS < -10 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                              {o.varianceDS > 0 ? '+' : ''}{o.varianceDS.toLocaleString()}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            {dispOk
-                              ? <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200"><CheckCircle2 className="w-3 h-3" />OK</span>
-                              : <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-700 bg-red-50 px-2 py-0.5 rounded-full border border-red-200"><XCircle className="w-3 h-3" />Gap</span>
-                            }
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
+                  </tfoot>
                 </table>
               )}
 
@@ -636,7 +768,7 @@ export const CompareDispatchPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <h2 className="text-lg font-extrabold text-slate-900">{detailOutlet.outlet}</h2>
-                      <p className="text-xs text-slate-400">Detailed S / P / Dispatch breakdown</p>
+                      <p className="text-xs text-slate-400">Detailed Sales &amp; Purchase breakdown</p>
                     </div>
                     <button onClick={() => setTab('compare')} className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 px-3 py-1.5 border border-slate-200 rounded-lg">
                       ← Back to table
@@ -650,17 +782,12 @@ export const CompareDispatchPage: React.FC = () => {
                       { label: 'Sales Amount', val: detailOutlet.salesAmt, color: 'emerald' },
                       { label: 'Purchase Qty', val: detailOutlet.purchaseQty, color: 'blue' },
                       { label: 'Purchase Amount', val: detailOutlet.purchaseAmt, color: 'blue' },
-                      ...(hasDispatch ? [
-                        { label: 'Dispatched Qty', val: detailOutlet.dispatchQty, color: 'violet' },
-                        { label: 'Dispatch Packs', val: detailOutlet.dispatchPacks, color: 'violet' },
-                      ] : []),
                       { label: 'Sales−Purchase', val: detailOutlet.varianceSP, color: detailOutlet.varianceSP >= 0 ? 'emerald' : 'red' },
                       { label: 'RMD %', val: `${detailOutlet.rmdPct.toFixed(2)}%`, color: 'slate' },
                     ].map(c => (
                       <div key={c.label} className={`rounded-xl border p-3 ${
                         c.color === 'emerald' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' :
                         c.color === 'blue'    ? 'bg-blue-50    border-blue-100    text-blue-800' :
-                        c.color === 'violet'  ? 'bg-violet-50  border-violet-100  text-violet-800' :
                         c.color === 'red'     ? 'bg-red-50     border-red-100     text-red-800' :
                         'bg-slate-50 border-slate-100 text-slate-800'}`}>
                         <p className="text-[11px] font-medium opacity-70">{c.label}</p>
@@ -673,10 +800,6 @@ export const CompareDispatchPage: React.FC = () => {
                   <div className="flex flex-wrap gap-2 items-center">
                     <span className="text-xs font-semibold text-slate-600">Variances:</span>
                     <VBadge val={detailOutlet.varianceSP} label="Sales vs Purchase" />
-                    {hasDispatch && <>
-                      <VBadge val={detailOutlet.varianceDP} label="Dispatch vs Purchase" />
-                      <VBadge val={detailOutlet.varianceDS} label="Dispatch vs Sold" />
-                    </>}
                   </div>
 
                   {/* Raw items from each file */}
@@ -727,7 +850,6 @@ export const CompareDispatchPage: React.FC = () => {
           <div className="flex flex-wrap gap-4 text-[11px] text-slate-500 font-medium">
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />Green variance = Sales &gt; Purchase (more sold than received)</span>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block" />Red variance = Sales &lt; Purchase (stock gap)</span>
-            {hasDispatch && <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-violet-500 inline-block" />D−P = Factory dispatched minus outlet received (transit loss?)</span>}
           </div>
         </>
       )}
