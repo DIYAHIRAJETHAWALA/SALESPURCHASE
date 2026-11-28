@@ -341,18 +341,21 @@ export const CategoryUploadPage: React.FC = () => {
             />
           </label>
 
-          <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-sm cursor-pointer transition-colors">
-            <UploadCloud className="w-4 h-4" />
-            <span>{loading ? 'Processing...' : activeData ? 'Upload Another File' : 'Upload Excel / CSV'}</span>
-            <input
-              type="file"
-              accept=".xlsx,.xlsm,.xls,.csv"
-              multiple
-              onChange={onFileChange}
-              disabled={loading}
-              className="hidden"
-            />
-          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveCategoryIdx(-1);
+              setActiveRawSheetIdx(0);
+              setSelectedOutlet('__ALL__');
+              setSelectedItem('__SUMMARY__');
+              setItemSearch('');
+            }}
+            disabled={datasets.length === 0}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold text-sm shadow-sm transition-colors"
+          >
+            <Layers className="w-4 h-4" />
+            <span>Merge All</span>
+          </button>
 
           {datasets.length > 0 && (
             <button
