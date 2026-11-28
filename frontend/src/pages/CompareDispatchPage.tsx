@@ -253,23 +253,31 @@ export const CompareDispatchPage: React.FC = () => {
         if (data.outlets && data.outlets.length > 0) {
           for (const o of data.outlets) {
             for (const item of (o.items || [])) {
+              const salesQty = (item.sales_qty ?? 0) || ((item.individual_sales ?? 0) + (item.combo_sales ?? 0));
+              const purchQty = (item.purchase_units ?? 0) || (item.purchase_packs ?? 0);
+              const qty = role === 'purchase' ? (purchQty || salesQty) : (salesQty || purchQty);
+              const unitPrice = parseNumber(String(item.menu_ref || '').replace('₹', ''));
+              const amount = unitPrice > 0 ? unitPrice * qty : 0;
               allRows.push({
                 outlet: o.outlet,
                 item: item.name || '',
-                qty: (item.individual_sales ?? 0) + (item.combo_sales ?? 0),
+                qty,
                 packs: item.purchase_packs ?? 0,
-                amount: (item.individual_sales ?? 0) + (item.combo_sales ?? 0),
+                amount,
                 raw: {},
               });
             }
             // If outlet has no items, still add outlet-level summary
             if (!o.items || o.items.length === 0) {
+              const salesQty = o.summary?.total_sales_qty ?? 0;
+              const purchQty = (o.summary?.purchase_units ?? 0) || (o.summary?.purchase_packs ?? 0);
+              const qty = role === 'purchase' ? (purchQty || salesQty) : (salesQty || purchQty);
               allRows.push({
                 outlet: o.outlet,
                 item: '_OUTLET_TOTAL_',
-                qty: o.summary?.total_sales_qty ?? 0,
+                qty,
                 packs: o.summary?.purchase_packs ?? 0,
-                amount: o.summary?.individual_sales ?? 0,
+                amount: 0,
                 raw: {},
               });
             }
